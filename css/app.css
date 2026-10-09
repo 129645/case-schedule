@@ -54,6 +54,7 @@ button { cursor: pointer; }
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 40px; padding: 0 16px;
   border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-weight: 500; white-space: nowrap;
 }
+a.btn { text-decoration: none; color: var(--ink); }
 .btn:hover { background: var(--surface-2); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .btn.primary:hover { filter: brightness(.96); }
@@ -160,6 +161,7 @@ main { max-width: 1280px; margin: 0 auto; padding: 12px 16px 96px; }
   .week .hd { padding: 6px 2px; }
   .week .hd .ddate { font-size: 15px; }
   .week .tm { padding: 6px 4px 0 0; font-size: 10px; }
+  .week .tm .now-tag { font-size: 9px; padding: 0 3px; }
   .week .cell { padding: 3px; gap: 3px; min-height: 40px; }
   .chip { height: auto; min-height: 22px; padding: 2px 4px; font-size: 11.5px; border-radius: 5px; flex-wrap: wrap; row-gap: 1px; width: 100%; justify-content: flex-start; }
   .chip .bd { font-size: 9px; padding: 0 2px; }
@@ -177,7 +179,12 @@ main { max-width: 1280px; margin: 0 auto; padding: 12px 16px 96px; }
 .day-list { display: grid; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); overflow: clip; }
 .day-row { display: grid; grid-template-columns: 92px 1fr; border-top: 1px solid var(--line); }
 .day-row:first-child { border-top: 0; }
-.day-row.now { box-shadow: inset 3px 0 0 var(--accent); }
+.day-row.now { background: var(--accent-soft); box-shadow: inset 4px 0 0 var(--accent); }
+.day-row.now .t { color: var(--accent); font-weight: 600; }
+.now-tag { display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-size: 11px; font-weight: 600; line-height: 1.5; }
+.week .tm.now { color: var(--accent); font-weight: 600; }
+.week .tm .now-tag { display: block; width: max-content; margin: 4px 0 0 auto; }
+.week .cell.now { background: color-mix(in srgb, var(--accent) 22%, var(--surface)); box-shadow: inset 0 0 0 2px var(--accent); }
 .day-row .t { padding: 14px 0 0 16px; font-size: 14px; color: var(--ink-2); }
 .day-row .t small { display: block; font-size: 12px; color: var(--ink-3); }
 .day-row .items { padding: 10px 12px 10px 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; align-content: start; }

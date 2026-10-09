@@ -30,6 +30,12 @@
     filter: null,
     menuOpen: false,
   };
+  // 依裝置時間找出「現在」所在的時段（不在上課時間則為 null）
+  function nowSlot() {
+    const n = new Date();
+    const t = U.pad(n.getHours()) + ':' + U.pad(n.getMinutes());
+    return U.SLOT_TIMES.find(x => t >= x && t < U.endOf(x)) || null;
+  }
   const weekDates = () => { const m = U.mondayOf(ui.date); return [0, 1, 2, 3, 4].map(i => U.addDays(m, i)); };
 
   /* ---------- 小工具 ---------- */
@@ -196,6 +202,7 @@
       <button data-m="roster" role="menuitem">個案名冊</button>
       <button data-m="interns" role="menuitem"${net}>實習生與顏色</button>
       <button data-m="memo" role="menuitem">常用備忘</button>
+      <button data-m="sms" role="menuitem">請假簡訊範本</button>
       <hr>
       <button data-m="import-contacts" role="menuitem"${net}>匯入個案聯絡資訊</button>
       <button data-m="import-schedule" role="menuitem"${net}>匯入排程表</button>
@@ -252,17 +259,19 @@
 
   function weekHTML(dates) {
     const today = realToday();
+    const cur = nowSlot();
     let html = '<div class="week-scroll"><div class="week" role="grid"><div class="hd corner"></div>';
     dates.forEach((d, i) => {
       html += `<div class="hd ${d === today ? 'is-today' : ''}" data-goday="${d}" role="columnheader"><div class="dname">${DAY[i + 1]}</div><div class="ddate num">${md(d)}</div></div>`;
     });
     U.SLOT_TIMES.forEach(t => {
       if (t === '13:30') html += '<div class="lunch">午休 12:00 – 13:30</div>';
-      html += `<div class="tm num">${t}</div>`;
+      const rowNow = cur === t && dates.includes(today);
+      html += `<div class="tm num ${rowNow ? 'now' : ''}">${t}${rowNow ? '<span class="now-tag">現在</span>' : ''}</div>`;
       dates.forEach(d => {
         const list = S.slotsAt(d, t);
         const n = list.filter(s => s.kind === 'case').length;
-        html += `<div class="cell ${d === today ? 'is-today' : ''} ${n >= U.MAX_PER_SLOT ? 'full' : ''} ${list.length ? '' : 'empty'}" role="gridcell">`;
+        html += `<div class="cell ${d === today ? 'is-today' : ''} ${d === today && cur === t ? 'now' : ''} ${n >= U.MAX_PER_SLOT ? 'full' : ''} ${list.length ? '' : 'empty'}" role="gridcell">`;
         list.forEach(s => { html += chipHTML(s, d); });
         if (n < U.MAX_PER_SLOT) html += `<button class="add" data-add="${d}|${t}" aria-label="新增到 ${DAY[U.weekday(d)]} ${t}">＋</button>`;
         html += '</div>';
@@ -273,7 +282,7 @@
 
   function dayHTML(d) {
     const today = realToday();
-    const now = new Date(); const nowT = U.pad(now.getHours()) + ':' + U.pad(now.getMinutes());
+    const cur = nowSlot();
     let count = 0;
     let rows = '';
     U.SLOT_TIMES.forEach(t => {
@@ -281,10 +290,10 @@
       const list = S.slotsAt(d, t);
       const cases = list.filter(s => s.kind === 'case');
       count += cases.length;
-      const isNow = d === today && nowT >= t && nowT < U.endOf(t);
+      const isNow = d === today && cur === t;
       let items = list.map(s => s.kind === 'note' ? `<button class="card" data-note="${esc(s.id)}" data-date="${d}"><span class="bar"></span><span class="main"><span class="meta">私人註記</span><div class="nm" style="font-weight:500">${esc(s.text)}</div></span></button>` : cardHTML(s, d)).join('');
       if (cases.length < U.MAX_PER_SLOT) items += `<button class="day-add" data-add="${d}|${t}">＋ 新增</button>`;
-      rows += `<div class="day-row ${isNow ? 'now' : ''}"><div class="t num">${t}<small>${U.endOf(t)}</small></div><div class="items">${items}</div></div>`;
+      rows += `<div class="day-row ${isNow ? 'now' : ''}" ${isNow ? 'id="now-row"' : ''}><div class="t num">${t}<small>${U.endOf(t)}</small>${isNow ? '<span class="now-tag">現在</span>' : ''}</div><div class="items">${items}</div></div>`;
     });
     const x = U.parse(d);
     return `<div class="day-head"><h1 class="num">${x.getMonth() + 1}月${x.getDate()}日</h1><span class="wd">${DAY[U.weekday(d)]}${d === today ? '・今天' : ''}</span><span class="count">${count} 位個案</span></div>
@@ -321,6 +330,8 @@
       const t = firstWorkday(realToday());
       if (U.mondayOf(t) === U.mondayOf(ui.date)) ui.date = t;
       render();
+      const nr = document.getElementById('now-row');
+      if (nr) nr.scrollIntoView({ block: 'center' });
     };
     $('#export-btn').onclick = openExport;
     $('#menu-btn').onclick = e => { e.stopPropagation(); ui.menuOpen = !ui.menuOpen; render(); };
@@ -345,6 +356,7 @@
     if (m === 'roster') return openRoster();
     if (m === 'interns') return openInterns();
     if (m === 'memo') return openMemo();
+    if (m === 'sms') return openSmsTemplate();
     if (m === 'import-contacts') return openImport('contacts');
     if (m === 'import-schedule') return openImport('schedule');
     if (m === 'backup') return window.Exporter.backup().then(() => toast('備份檔已下載')).catch(e => toast(e.message));
@@ -465,8 +477,13 @@
         <input class="input hidden num" type="date" id="rg-to" min="${date}" max="${maxDate}" value="${U.addDays(date, 7)}" style="width:auto;min-height:40px" aria-label="到哪一天為止">
       </div>
       <div class="hint" id="rg-hint" style="margin-top:6px"></div>
+      <div class="section-label">通知家長</div>
+      <div class="row"><button class="btn" id="sms-copy">複製請假簡訊</button>${smsLink(s, date) ? `<a class="btn" id="sms-send" href="${smsLink(s, date)}">傳簡訊給家長</a>` : ''}<button class="btn ghost" id="sms-view">看內容</button></div>
+      <div class="report small hidden" id="sms-preview" style="white-space:pre-wrap;margin-top:8px"></div>
       <div class="section-label">評估</div>
       <div class="switch-row"><span>這次需要做評估</span><button class="switch needs-net" role="switch" id="eval-sw" aria-checked="${e.eval}" aria-label="需評估"></button></div>`;
+    $('#sms-copy', body).onclick = () => copyText(smsText(date)).then(ok => toast(ok ? `已複製 ${md(date)} 的請假簡訊` : '無法複製，請按「看內容」手動複製'));
+    $('#sms-view', body).onclick = () => { const p = $('#sms-preview', body); p.textContent = smsText(date); p.classList.toggle('hidden'); };
     let range = false;
     const toEl = $('#rg-to', body);
     const hint = () => {
@@ -773,6 +790,54 @@
     };
   }
 
+  /* ---------- 請假簡訊 ---------- */
+  const SMS_DEFAULT = `【職能治療課程異動通知】
+親愛的家長您好：
+非常抱歉通知您，因職能治療劉奇鑫老師將於 00月00日（星期0）參與會議，當日職能治療課程將暫停一次，造成您的不便，敬請見諒。
+若您需要協助安排調課，或有任何相關問題，歡迎於上班時間來電洽詢，電話：04-7238595 分機 7019。
+感謝您的體諒與配合，祝您及家人平安順心！`;
+  const DATE_RE = /\d{1,2}\s*月\s*\d{1,2}\s*日\s*[（(]\s*星期\s*.\s*[）)]/;
+  function smsText(date) {
+    const x = U.parse(date);
+    const dd = `${x.getMonth() + 1}月${x.getDate()}日（星期${DAY_S[U.weekday(date)]}）`;
+    const tpl = S.setting('smsTemplate', SMS_DEFAULT) || SMS_DEFAULT;
+    return tpl.includes('{日期}') ? tpl.split('{日期}').join(dd) : tpl.replace(DATE_RE, dd);
+  }
+  function smsLink(s, date) {
+    const c = S.caseOf(s);
+    const num = c ? (String(c.phone || c.phone2 || '').match(/09[\d\-]{8,11}/) || [''])[0].replace(/-/g, '') : '';
+    if (num.length !== 10) return '';
+    const ios = /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent) && 'ontouchend' in document;
+    return `sms:${num}${ios ? '&' : '?'}body=${encodeURIComponent(smsText(date))}`;
+  }
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch (e) {
+      const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch (e2) { }
+      ta.remove(); return ok;
+    }
+  }
+  function openSmsTemplate() {
+    const sample = U.addDays(firstWorkday(realToday()), 0);
+    openSheet({
+      title: '請假簡訊範本', sub: '「00月00日（星期0）」會自動換成請假那天的日期',
+      body: `<textarea class="input" id="sms-tpl" rows="9">${esc(S.setting('smsTemplate', SMS_DEFAULT) || SMS_DEFAULT)}</textarea>
+        <div class="hint" style="margin-top:6px">在個案的「請假・評估」頁面可以一鍵複製，或直接傳給家長。</div>
+        <div class="section-label">預覽（以 ${md(sample)} 為例）</div><div class="report small" id="sms-sample" style="white-space:pre-wrap"></div>`,
+      foot: '<button class="btn ghost" id="sms-reset" style="margin-right:auto">還原預設</button><button class="btn primary needs-net" id="sms-save">儲存</button>',
+      onClose: render,
+    });
+    const prev = () => {
+      const x = U.parse(sample), dd = `${x.getMonth() + 1}月${x.getDate()}日（星期${DAY_S[U.weekday(sample)]}）`, t = $('#sms-tpl').value;
+      $('#sms-sample').textContent = t.includes('{日期}') ? t.split('{日期}').join(dd) : t.replace(DATE_RE, dd);
+    };
+    $('#sms-tpl').oninput = prev; prev();
+    $('#sms-reset').onclick = () => { $('#sms-tpl').value = SMS_DEFAULT; prev(); };
+    $('#sms-save').onclick = async () => { const ok = await guard(() => S.setSetting('smsTemplate', $('#sms-tpl').value), '已儲存簡訊範本'); if (ok) closeSheet(); };
+  }
+
   /* ---------- 常用備忘 ---------- */
   function openMemo() {
     openSheet({
@@ -951,6 +1016,13 @@
       if (ui.view === 'day' && U.mondayOf(ui.date) === U.mondayOf(firstWorkday(realToday()))) { /* 跨日時保持今天 */ }
     }
   });
+  let lastSlot = nowSlot(), lastDay = realToday();
+  setInterval(() => {
+    const cur = nowSlot(), day = realToday();
+    if (cur === lastSlot && day === lastDay) return;
+    lastSlot = cur; lastDay = day;
+    if ($('#topbar') && !$('#sheet-root').innerHTML && !ui.menuOpen) { const y = window.scrollY; render(); window.scrollTo(0, y); }
+  }, 30000);
   setInterval(() => { if (document.visibilityState === 'visible' && S.remote && S.key() && S.online && !$('#sheet-root').innerHTML) S.refresh().catch(() => {}); }, 120000);
   S.on(() => { if ($('#topbar') && !$('#sheet-root').innerHTML) render(); });
 
