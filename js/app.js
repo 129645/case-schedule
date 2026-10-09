@@ -203,6 +203,7 @@
       <button data-m="interns" role="menuitem"${net}>實習生與顏色</button>
       <button data-m="memo" role="menuitem">常用備忘</button>
       <button data-m="sms" role="menuitem">請假簡訊範本</button>
+      <button data-m="mail" role="menuitem">寄信給協助同事</button>
       <hr>
       <button data-m="import-contacts" role="menuitem"${net}>匯入個案聯絡資訊</button>
       <button data-m="import-schedule" role="menuitem"${net}>匯入排程表</button>
@@ -296,8 +297,31 @@
       rows += `<div class="day-row ${isNow ? 'now' : ''}" ${isNow ? 'id="now-row"' : ''}><div class="t num">${t}<small>${U.endOf(t)}</small>${isNow ? '<span class="now-tag">現在</span>' : ''}</div><div class="items">${items}</div></div>`;
     });
     const x = U.parse(d);
-    return `<div class="day-head"><h1 class="num">${x.getMonth() + 1}月${x.getDate()}日</h1><span class="wd">${DAY[U.weekday(d)]}${d === today ? '・今天' : ''}</span><span class="count">${count} 位個案</span></div>
+    return `${dayStripHTML(d)}<div class="day-head"><h1 class="num">${x.getMonth() + 1}月${x.getDate()}日</h1><span class="wd">${DAY[U.weekday(d)]}${d === today ? '・今天' : ''}</span><span class="count">${count} 位個案</span></div>
       <div class="day-list">${rows}</div>`;
+  }
+
+  function dayStripHTML(d) {
+    const mon = U.mondayOf(d), thisMon = U.mondayOf(firstWorkday(realToday()));
+    const wk = mon === thisMon ? '本週' : mon === U.addDays(thisMon, 7) ? '下週' : mon === U.addDays(thisMon, -7) ? '上週' : `${md(mon)} 那週`;
+    const today = realToday();
+    const days = [0, 1, 2, 3, 4].map(i => {
+      const x = U.addDays(mon, i);
+      let n = 0, leave = 0;
+      for (const s of S.data.slots) {
+        if (s.kind !== 'case' || !S.activeOn(s, x)) continue;
+        n++;
+        const m = S.markById.get(s.id + '|' + x);
+        if (m && m.status && m.status !== 'none') leave++;
+      }
+      return `<button class="ds-day ${x === d ? 'sel' : ''} ${x === today ? 'today' : ''}" data-goday="${x}" aria-pressed="${x === d}">
+        <span class="ds-w">${DAY_S[i + 1]}</span><span class="ds-d num">${md(x)}</span><span class="ds-n">${n} 位${leave ? `<i class="ds-dot" title="有 ${leave} 筆請假或代課"></i>` : ''}</span></button>`;
+    }).join('');
+    return `<div class="day-strip">
+      <button class="btn ds-jump" data-jump="-7" aria-label="上一週">${ICON.left}<span class="hide-sm">上週</span></button>
+      <div class="ds-mid"><div class="ds-label">${wk}</div><div class="ds-days">${days}</div></div>
+      <button class="btn ds-jump ${mon === thisMon ? 'primary' : ''}" data-jump="7" aria-label="下一週"><span>${mon === thisMon ? '下週' : '下一週'}</span>${ICON.right}</button>
+    </div>`;
   }
 
   function cardHTML(s, d) {
@@ -342,6 +366,7 @@
     $$('[data-slot]').forEach(b => b.onclick = () => openCase(b.dataset.slot, b.dataset.date));
     $$('[data-note]').forEach(b => b.onclick = () => openNote(b.dataset.note, b.dataset.date));
     $$('[data-add]').forEach(b => b.onclick = () => { const [d, t] = b.dataset.add.split('|'); openAdd(d, t); });
+    $$('[data-jump]').forEach(b => b.onclick = () => { ui.date = U.addDays(ui.date, +b.dataset.jump); render(); });
   }
   const prevWorkday = d => { let x = U.addDays(d, -1); while (U.weekday(x) > 5) x = U.addDays(x, -1); return x; };
   const nextWorkday = d => { let x = U.addDays(d, 1); while (U.weekday(x) > 5) x = U.addDays(x, 1); return x; };
@@ -357,6 +382,7 @@
     if (m === 'interns') return openInterns();
     if (m === 'memo') return openMemo();
     if (m === 'sms') return openSmsTemplate();
+    if (m === 'mail') { const mon = U.mondayOf(ui.date); return openHelperMail(ui.view === 'day' ? ui.date : mon, ui.view === 'day' ? ui.date : U.addDays(mon, 4)); }
     if (m === 'import-contacts') return openImport('contacts');
     if (m === 'import-schedule') return openImport('schedule');
     if (m === 'backup') return window.Exporter.backup().then(() => toast('備份檔已下載')).catch(e => toast(e.message));
@@ -479,10 +505,12 @@
       <div class="hint" id="rg-hint" style="margin-top:6px"></div>
       <div class="section-label">通知家長</div>
       <div class="row"><button class="btn" id="sms-copy">複製請假簡訊</button>${smsLink(s, date) ? `<a class="btn" id="sms-send" href="${smsLink(s, date)}">傳簡訊給家長</a>` : ''}<button class="btn ghost" id="sms-view">看內容</button></div>
+      <div class="row" style="margin-top:8px"><button class="btn" id="mail-help">寄信給協助同事</button></div>
       <div class="report small hidden" id="sms-preview" style="white-space:pre-wrap;margin-top:8px"></div>
       <div class="section-label">評估</div>
       <div class="switch-row"><span>這次需要做評估</span><button class="switch needs-net" role="switch" id="eval-sw" aria-checked="${e.eval}" aria-label="需評估"></button></div>`;
     $('#sms-copy', body).onclick = () => copyText(smsText(date)).then(ok => toast(ok ? `已複製 ${md(date)} 的請假簡訊` : '無法複製，請按「看內容」手動複製'));
+    $('#mail-help', body).onclick = () => { closeSheet(); openHelperMail(date, date); };
     $('#sms-view', body).onclick = () => { const p = $('#sms-preview', body); p.textContent = smsText(date); p.classList.toggle('hidden'); };
     let range = false;
     const toEl = $('#rg-to', body);
@@ -819,6 +847,87 @@
       ta.remove(); return ok;
     }
   }
+  const HELPER_MAIL = { '林怡儒': '179337@cch.org.tw', '吳金龍': '108859@cch.org.tw', '蕭名雅': '183097@cch.org.tw' };
+  function helperList(from, to, withWeekly) {
+    const out = {};
+    U.THERAPISTS.forEach(n => { out[n] = []; });
+    for (let d = from; d <= to; d = U.addDays(d, 1)) {
+      if (U.weekday(d) > 5) continue;
+      for (const s of S.data.slots) {
+        if (s.kind !== 'case' || !S.activeOn(s, d)) continue;
+        const e = S.effective(s, d);
+        if (e.status !== 'helper' || !e.helper || !out[e.helper]) continue;
+        if (e.mark.status !== 'helper' && !withWeekly) continue; // 每週固定協助預設不列入
+        const c = S.caseOf(s);
+        out[e.helper].push({ date: d, time: s.time, name: S.nameOf(s), age: c && c.birthday ? U.ageText(U.ageBetween(c.birthday, d)) : '' });
+      }
+    }
+    Object.values(out).forEach(a => a.sort((x, y) => x.date.localeCompare(y.date) || x.time.localeCompare(y.time)));
+    return out;
+  }
+  function mailBody(helper, items, sign) {
+    const given = helper.slice(-2);
+    const byDate = {};
+    items.forEach(it => { (byDate[it.date] = byDate[it.date] || []).push(it); });
+    const lines = [`${given}老師您好：`, '', '不好意思打擾您了！以下時段我無法到班，想麻煩您協助這幾位個案的職能治療課程，非常感謝您的幫忙：', ''];
+    Object.keys(byDate).sort().forEach(d => {
+      const x = U.parse(d);
+      lines.push(`■ ${x.getMonth() + 1}月${x.getDate()}日（星期${DAY_S[U.weekday(d)]}）`);
+      byDate[d].forEach(it => lines.push(`　${it.time}–${U.endOf(it.time)}　${it.name}${it.age ? `（${it.age}）` : ''}`));
+      lines.push('');
+    });
+    lines.push('如有任何問題，歡迎隨時與我聯繫。', '再次感謝您的協助，辛苦了！', '', `${sign} 敬上`);
+    return lines.join('\n');
+  }
+  function mailSubject(items) {
+    const ds = [...new Set(items.map(i => i.date))].sort();
+    const r = ds.length > 1 ? `${md(ds[0])}～${md(ds[ds.length - 1])}` : md(ds[0]);
+    return `職能治療個案協助提醒（${r}）`;
+  }
+  function openHelperMail(from, to) {
+    let withWeekly = false;
+    openSheet({
+      title: '寄信給協助同事', sub: '整理請其他治療師協助的個案，用你的郵件 App 寄出', wide: true,
+      body: `
+        <div class="row">
+          <div class="field" style="margin:0"><label for="hm-from">從</label><input class="input num" type="date" id="hm-from" value="${from}"></div>
+          <div class="field" style="margin:0"><label for="hm-to">到</label><input class="input num" type="date" id="hm-to" value="${to}"></div>
+          <div class="field" style="margin:0"><label for="hm-sign">署名</label><input class="input" id="hm-sign" value="${esc(S.setting('mailSign', '奇鑫'))}"></div>
+        </div>
+        <div class="row" style="margin-top:8px"><button class="btn" data-range="this">本週</button><button class="btn" data-range="next">下週</button></div>
+        <div class="switch-row" style="margin-top:12px"><span>也列入「每週固定協助」的個案</span><button class="switch" role="switch" id="hm-weekly" aria-checked="false" aria-label="列入每週固定協助"></button></div>
+        <div id="hm-list" style="margin-top:16px"></div>`,
+      onClose: render,
+    });
+    const draw = () => {
+      const f = $('#hm-from').value, t = $('#hm-to').value;
+      if (!f || !t || t < f) { $('#hm-list').innerHTML = '<div class="err">請選擇正確的日期範圍</div>'; return; }
+      const list = helperList(f, t, withWeekly);
+      const sign = $('#hm-sign').value.trim() || '奇鑫';
+      const any = Object.values(list).some(a => a.length);
+      $('#hm-list').innerHTML = any ? U.THERAPISTS.filter(n => list[n].length).map(n => `
+        <div class="report" style="margin-bottom:10px">
+          <div class="row" style="justify-content:space-between"><b>${esc(n)}　<span class="muted small">${HELPER_MAIL[n]}・${list[n].length} 位</span></b>
+            <span class="row"><button class="btn" data-copy="${esc(n)}">複製內容</button><a class="btn primary" href="mailto:${HELPER_MAIL[n]}?subject=${encodeURIComponent(mailSubject(list[n]))}&body=${encodeURIComponent(mailBody(n, list[n], sign).replace(/\n/g, '\r\n'))}" data-mail="${esc(n)}">寄信</a></span></div>
+          <div class="small" style="white-space:pre-wrap;margin-top:10px;color:var(--ink-2)">${esc(mailBody(n, list[n], sign))}</div>
+        </div>`).join('') : `<div class="report">這段期間沒有標記「請其他治療師協助」的個案。<div class="small muted" style="margin-top:4px">先點個案 →「請假・評估」→ 選「請○○協助」，再回來寄信。</div></div>`;
+      $$('[data-copy]').forEach(b => b.onclick = () => {
+        const n = b.dataset.copy;
+        copyText(`主旨：${mailSubject(list[n])}\n\n${mailBody(n, list[n], sign)}`).then(ok => toast(ok ? `已複製給${n}的信件內容` : '無法複製'));
+      });
+      $$('[data-mail]').forEach(a => a.addEventListener('click', () => toast('正在打開郵件 App…')));
+    };
+    $('#hm-from').onchange = () => { if ($('#hm-to').value < $('#hm-from').value) $('#hm-to').value = $('#hm-from').value; draw(); };
+    $('#hm-to').onchange = draw;
+    $('#hm-sign').onchange = () => { draw(); if (S.canEdit()) guard(() => S.setSetting('mailSign', $('#hm-sign').value.trim() || '奇鑫')); };
+    $$('[data-range]').forEach(b => b.onclick = () => {
+      const mon = U.mondayOf(firstWorkday(realToday())), m2 = b.dataset.range === 'next' ? U.addDays(mon, 7) : mon;
+      $('#hm-from').value = m2; $('#hm-to').value = U.addDays(m2, 4); draw();
+    });
+    $('#hm-weekly').onclick = () => { withWeekly = !withWeekly; $('#hm-weekly').setAttribute('aria-checked', withWeekly); draw(); };
+    draw();
+  }
+
   function openSmsTemplate() {
     const sample = U.addDays(firstWorkday(realToday()), 0);
     openSheet({
