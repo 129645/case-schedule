@@ -36,6 +36,27 @@
     const t = U.pad(n.getHours()) + ':' + U.pad(n.getMinutes());
     return U.SLOT_TIMES.find(x => t >= x && t < U.endOf(x)) || null;
   }
+  const OFF = st => st === 'parent' || st === 'self' || st === 'sms';
+  const STATUS_LABEL = { parent: '已向家長請假', self: '個案自己請假', sms: '已傳送簡訊請假' };
+
+  /* ---------- 我的請假時間（存在 settings，id 以 leave_ 開頭） ---------- */
+  const myLeaves = () => S.data.settings.filter(x => String(x.id).startsWith('leave_') && x.value)
+    .map(x => Object.assign({ id: x.id }, x.value)).sort((a, b) => a.date.localeCompare(b.date) || a.from.localeCompare(b.from));
+  const leaveAt = (d, t) => myLeaves().find(l => l.date === d && t >= l.from && t < l.to);
+  const leaveCases = l => {
+    const out = [];
+    U.SLOT_TIMES.filter(t => t >= l.from && t < l.to).forEach(t => S.slotsAt(l.date, t).forEach(s => {
+      if (s.kind !== 'case') return;
+      const e = S.effective(s, l.date);
+      out.push({ s, t, e, done: e.status !== 'none' });
+    }));
+    return out;
+  };
+  const daysUntil = d => Math.round((U.parse(d) - U.parse(realToday())) / 864e5);
+  const leaveLabel = l => `${md(l.date)}（${DAY_S[U.weekday(l.date)]}）${l.from}–${l.to}${l.reason ? '　' + l.reason : ''}`;
+  const upcomingPending = () => myLeaves().filter(l => { const n = daysUntil(l.date); return n >= 0 && n <= 7; })
+    .map(l => ({ l, todo: leaveCases(l).filter(x => !x.done) })).filter(x => x.todo.length);
+
   const weekDates = () => { const m = U.mondayOf(ui.date); return [0, 1, 2, 3, 4].map(i => U.addDays(m, i)); };
 
   /* ---------- 小工具 ---------- */
@@ -92,7 +113,7 @@
   function afterLoad() {
     const empty = !S.data.slots.length && !S.data.cases.length;
     if (empty && !S.setting('started', false) && !U.LS.get('cs_started', false)) showWelcome();
-    else render();
+    else { render(); setTimeout(maybeRemind, 400); }
   }
 
   /* ---------- 密碼 ---------- */
@@ -185,6 +206,7 @@
           </div>
         </div>
         <div class="sub-row" id="legend">${legendHTML(ui.view === 'week' ? dates : [ui.date])}</div>
+        ${remindBannerHTML()}
         ${offline ? '<div class="banner">目前離線：顯示上次載入的排程，只能查看，不能修改。</div>' : ''}
         ${!S.remote ? '<div class="banner">示範模式：資料只存在這台裝置。設定好 Google 試算表後，電腦與手機就會同步。</div>' : ''}
       </header>
@@ -192,6 +214,14 @@
     const tb = $('#topbar');
     document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
     bindMain();
+  }
+
+  function remindBannerHTML() {
+    const up = upcomingPending();
+    if (!up.length) return '';
+    const n = up.reduce((a, x) => a + x.todo.length, 0);
+    const first = up[0].l, du = daysUntil(first.date);
+    return `<div class="banner remind"><span>${du === 0 ? '今天' : du + ' 天後'}（${md(first.date)}）你要請假：還有 <b>${n}</b> 位個案尚未請假或找同事協助</span><button class="btn small-btn" id="remind-btn">查看</button></div>`;
   }
 
   function menuHTML() {
@@ -202,6 +232,7 @@
       <button data-m="roster" role="menuitem">個案名冊</button>
       <button data-m="interns" role="menuitem"${net}>實習生與顏色</button>
       <button data-m="memo" role="menuitem">常用備忘</button>
+      <button data-m="myleave" role="menuitem">我的請假時間</button>
       <button data-m="sms" role="menuitem">請假簡訊範本</button>
       <button data-m="mail" role="menuitem">寄信給協助同事</button>
       <hr>
@@ -234,9 +265,12 @@
     return e.intern !== ui.filter;
   }
 
-  function badges(s, e, short) {
+  function badges(s, e, d) {
+    const short = true;
     let b = '';
     if (e.status === 'parent') b += `<span class="bd leave">${short ? '假' : '已請假'}</span>`;
+    if (e.status === 'sms') b += `<span class="bd leave">訊</span>`;
+    if (e.status === 'none' && leaveAt(d || "", s.time)) b += `<span class="bd todo">待</span>`;
     if (e.status === 'self') b += `<span class="bd leave">個假</span>`;
     if (e.status === 'helper' && e.helper) b += `<span class="bd help">${esc(e.helper[0])}</span>`;
     if (e.eval) b += '<span class="bd eval">評</span>';
@@ -251,11 +285,11 @@
     const cls = ['chip'];
     const cc = colorClass(e.intern);
     if (cc) cls.push('tinted', cc);
-    if (e.status === 'parent' || e.status === 'self') cls.push('off');
+    if (OFF(e.status)) cls.push('off');
     if (dimmed(e)) cls.push('dim');
     const name = S.nameOf(s);
     const title = [name, s.note, e.status === 'helper' && e.helper ? '由' + e.helper + '協助' : ''].filter(Boolean).join('・');
-    return `<button class="${cls.join(' ')}" data-slot="${esc(s.id)}" data-date="${d}" title="${esc(title)}"><span class="nm">${esc(name)}</span>${badges(s, e, true)}</button>`;
+    return `<button class="${cls.join(' ')}" data-slot="${esc(s.id)}" data-date="${d}" title="${esc(title)}"><span class="nm">${esc(name)}</span>${badges(s, e, d)}</button>`;
   }
 
   function weekHTML(dates) {
@@ -272,7 +306,7 @@
       dates.forEach(d => {
         const list = S.slotsAt(d, t);
         const n = list.filter(s => s.kind === 'case').length;
-        html += `<div class="cell ${d === today ? 'is-today' : ''} ${d === today && cur === t ? 'now' : ''} ${n >= U.MAX_PER_SLOT ? 'full' : ''} ${list.length ? '' : 'empty'}" role="gridcell">`;
+        html += `<div class="cell ${leaveAt(d, t) ? 'myleave' : ''} ${d === today ? 'is-today' : ''} ${d === today && cur === t ? 'now' : ''} ${n >= U.MAX_PER_SLOT ? 'full' : ''} ${list.length ? '' : 'empty'}" role="gridcell">`;
         list.forEach(s => { html += chipHTML(s, d); });
         if (n < U.MAX_PER_SLOT) html += `<button class="add" data-add="${d}|${t}" aria-label="新增到 ${DAY[U.weekday(d)]} ${t}">＋</button>`;
         html += '</div>';
@@ -294,11 +328,21 @@
       const isNow = d === today && cur === t;
       let items = list.map(s => s.kind === 'note' ? `<button class="card" data-note="${esc(s.id)}" data-date="${d}"><span class="bar"></span><span class="main"><span class="meta">私人註記</span><div class="nm" style="font-weight:500">${esc(s.text)}</div></span></button>` : cardHTML(s, d)).join('');
       if (cases.length < U.MAX_PER_SLOT) items += `<button class="day-add" data-add="${d}|${t}">＋ 新增</button>`;
-      rows += `<div class="day-row ${isNow ? 'now' : ''}" ${isNow ? 'id="now-row"' : ''}><div class="t num">${t}<small>${U.endOf(t)}</small>${isNow ? '<span class="now-tag">現在</span>' : ''}</div><div class="items">${items}</div></div>`;
+      const lv = leaveAt(d, t);
+      rows += `<div class="day-row ${isNow ? 'now' : ''} ${lv ? 'myleave' : ''}" ${isNow ? 'id="now-row"' : ''}><div class="t num">${t}<small>${U.endOf(t)}</small>${isNow ? '<span class="now-tag">現在</span>' : ''}${lv ? '<span class="leave-tag">我請假</span>' : ''}</div><div class="items">${items}</div></div>`;
     });
     const x = U.parse(d);
-    return `${dayStripHTML(d)}<div class="day-head"><h1 class="num">${x.getMonth() + 1}月${x.getDate()}日</h1><span class="wd">${DAY[U.weekday(d)]}${d === today ? '・今天' : ''}</span><span class="count">${count} 位個案</span></div>
+    return `${dayStripHTML(d)}<div class="day-head"><h1 class="num">${x.getMonth() + 1}月${x.getDate()}日</h1><span class="wd">${DAY[U.weekday(d)]}${d === today ? '・今天' : ''}</span><span class="count">${count} 位個案</span><button class="btn small-btn" data-myleave="${d}">＋ 我這天請假</button></div>${dayLeaveHTML(d)}
       <div class="day-list">${rows}</div>`;
+  }
+
+  function dayLeaveHTML(d) {
+    return myLeaves().filter(l => l.date === d).map(l => {
+      const all = leaveCases(l), todo = all.filter(x => !x.done);
+      return `<div class="leave-banner ${todo.length ? 'warn' : 'ok'}"><div><b>你在 ${l.from}–${l.to} 請假${l.reason ? '（' + esc(l.reason) + '）' : ''}</b>
+        <div class="small">${all.length ? (todo.length ? `${all.length} 位個案，還有 ${todo.length} 位尚未請假或找同事協助` : `${all.length} 位個案都已處理好`) : '這段時間沒有個案'}</div></div>
+        <span class="row">${todo.length ? `<button class="btn primary" data-handle="${esc(l.id)}">處理</button>` : ''}<button class="btn" data-myleave="${d}">編輯</button></span></div>`;
+    }).join('');
   }
 
   function dayStripHTML(d) {
@@ -331,13 +375,15 @@
     const intern = internOf(e.intern);
     const tags = [];
     if (e.status === 'parent') tags.push('<span class="tag leave">已向家長請假</span>');
+    if (e.status === 'sms') tags.push('<span class="tag leave">已傳送簡訊請假</span>');
+    if (e.status === 'none' && leaveAt(d, s.time)) tags.push('<span class="tag todo">你請假中・尚未處理</span>');
     if (e.status === 'self') tags.push('<span class="tag leave">個案自己請假</span>');
     if (e.status === 'helper' && e.helper) tags.push(`<span class="tag help">由${esc(e.helper)}協助</span>`);
     if (e.eval) tags.push('<span class="tag eval">需評估</span>');
     if (intern) tags.push(`<span class="tag ${'c-' + intern.color}">${esc(intern.name)}</span>`);
     if (s.only && s.only.length) tags.push('<span class="tag once">只有特定日期</span>');
     if (s.note) tags.push(`<span class="tag">${esc(s.note)}</span>`);
-    const off = e.status === 'parent' || e.status === 'self';
+    const off = OFF(e.status);
     return `<button class="card ${off ? 'off' : ''} ${dimmed(e) ? 'chip dim' : ''}" data-slot="${esc(s.id)}" data-date="${d}" style="${dimmed(e) ? 'opacity:.3' : ''}">
       <span class="bar ${intern ? 'c-' + intern.color : ''}"></span>
       <span class="main"><div class="nm">${esc(S.nameOf(s))}</div><div class="meta">${age || (c ? '未填生日' : '找不到聯絡資料')}</div>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</span>
@@ -367,6 +413,9 @@
     $$('[data-note]').forEach(b => b.onclick = () => openNote(b.dataset.note, b.dataset.date));
     $$('[data-add]').forEach(b => b.onclick = () => { const [d, t] = b.dataset.add.split('|'); openAdd(d, t); });
     $$('[data-jump]').forEach(b => b.onclick = () => { ui.date = U.addDays(ui.date, +b.dataset.jump); render(); });
+    $$('[data-myleave]').forEach(b => b.onclick = () => openMyLeaves(b.dataset.myleave));
+    $$('[data-handle]').forEach(b => b.onclick = () => openReminder(b.dataset.handle));
+    const rb2 = $('#remind-btn'); if (rb2) rb2.onclick = () => openReminder();
   }
   const prevWorkday = d => { let x = U.addDays(d, -1); while (U.weekday(x) > 5) x = U.addDays(x, -1); return x; };
   const nextWorkday = d => { let x = U.addDays(d, 1); while (U.weekday(x) > 5) x = U.addDays(x, 1); return x; };
@@ -382,6 +431,7 @@
     if (m === 'interns') return openInterns();
     if (m === 'memo') return openMemo();
     if (m === 'sms') return openSmsTemplate();
+    if (m === 'myleave') return openMyLeaves(ui.view === 'day' ? ui.date : null);
     if (m === 'mail') { const mon = U.mondayOf(ui.date); return openHelperMail(ui.view === 'day' ? ui.date : mon, ui.view === 'day' ? ui.date : U.addDays(mon, 4)); }
     if (m === 'import-contacts') return openImport('contacts');
     if (m === 'import-schedule') return openImport('schedule');
@@ -489,7 +539,7 @@
 
   function leaveTab(body, s, date, repaint) {
     const e = S.effective(s, date);
-    const opts = [['none', '正常上課'], ['parent', '已向家長請假'], ['self', '個案自己請假']]
+    const opts = [['none', '正常上課'], ['sms', '已傳送簡訊請假'], ['parent', '已向家長請假'], ['self', '個案自己請假']]
       .concat(U.THERAPISTS.map(n => ['helper:' + n, `請${n}協助`]));
     const cur = e.status === 'helper' ? 'helper:' + e.helper : e.status;
     const maxDate = U.addDays(date, 120);
@@ -510,6 +560,25 @@
       <div class="section-label">評估</div>
       <div class="switch-row"><span>這次需要做評估</span><button class="switch needs-net" role="switch" id="eval-sw" aria-checked="${e.eval}" aria-label="需評估"></button></div>`;
     $('#sms-copy', body).onclick = () => copyText(smsText(date)).then(ok => toast(ok ? `已複製 ${md(date)} 的請假簡訊` : '無法複製，請按「看內容」手動複製'));
+    const sendBtn = $('#sms-send', body);
+    if (sendBtn) sendBtn.addEventListener('click', () => {
+      if (e.status === 'sms') return;
+      setTimeout(() => {
+        const box = $('#sms-preview', body); if (!box) return;
+        box.classList.remove('hidden');
+        box.innerHTML = '傳出簡訊後，要把這位標記為「已傳送簡訊請假」嗎？<div class="row" style="margin-top:8px"><button class="btn primary" id="sms-mark">標記</button></div>';
+        $('#sms-mark', body).onclick = async () => { const ok = await guard(() => S.setMark(s, date, { status: 'sms', helper: undefined }), '已標記：已傳送簡訊請假'); if (ok) repaint(); };
+      }, 600);
+    });
+    $('#sms-copy', body).addEventListener('click', () => {
+      if (e.status !== 'none') return;
+      setTimeout(() => {
+        const box = $('#sms-preview', body); if (!box) return;
+        box.classList.remove('hidden');
+        box.innerHTML = '簡訊傳出後，記得把這位標記為「已傳送簡訊請假」。<div class="row" style="margin-top:8px"><button class="btn primary" id="sms-mark">現在標記</button></div>';
+        $('#sms-mark', body).onclick = async () => { const ok = await guard(() => S.setMark(s, date, { status: 'sms', helper: undefined }), '已標記：已傳送簡訊請假'); if (ok) repaint(); };
+      }, 300);
+    });
     $('#mail-help', body).onclick = () => { closeSheet(); openHelperMail(date, date); };
     $('#sms-view', body).onclick = () => { const p = $('#sms-preview', body); p.textContent = smsText(date); p.classList.toggle('hidden'); };
     let range = false;
@@ -816,6 +885,91 @@
         if (ok) closeSheet();
       };
     };
+  }
+
+  /* ---------- 我的請假時間 ---------- */
+  function openMyLeaves(prefill) {
+    const today = realToday();
+    const fromOpts = sel => U.SLOT_TIMES.map(t => `<option ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
+    const toOpts = sel => U.SLOT_TIMES.map(t => U.endOf(t)).map(t => `<option ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
+    const list = myLeaves().filter(l => l.date >= today);
+    openSheet({
+      title: '我的請假時間', sub: '請假日前 7 天起，App 會提醒你還沒處理的個案', wide: true,
+      body: `
+        <div class="section-label">新增請假</div>
+        <div class="row">
+          <div class="field" style="margin:0"><label for="ml-date">日期</label><input class="input num" type="date" id="ml-date" value="${prefill || firstWorkday(U.addDays(today, 7))}"></div>
+          <div class="field" style="margin:0;flex:0 1 120px"><label for="ml-from">從</label><select class="input num" id="ml-from">${fromOpts('08:00')}</select></div>
+          <div class="field" style="margin:0;flex:0 1 120px"><label for="ml-to">到</label><select class="input num" id="ml-to">${toOpts('17:30')}</select></div>
+        </div>
+        <div class="row" style="margin-top:8px"><button class="btn" data-preset="08:00|17:30">全天</button><button class="btn" data-preset="08:00|12:00">上午</button><button class="btn" data-preset="13:30|17:30">下午</button></div>
+        <div class="field" style="margin-top:12px"><label for="ml-reason">原因（選填）</label><input class="input" id="ml-reason" placeholder="例如：會議、研習、休假"></div>
+        <div class="hint" id="ml-hint"></div>
+        <div class="err" id="ml-err"></div>
+        <div class="row"><button class="btn primary needs-net" id="ml-add">新增請假</button></div>
+        <div class="section-label">已安排的請假</div>
+        <div class="list" id="ml-list">${list.length ? list.map(l => {
+          const all = leaveCases(l), todo = all.filter(x => !x.done).length;
+          return `<div><span style="flex:1"><b class="num">${esc(leaveLabel(l))}</b><div class="small ${todo ? '' : 'muted'}" style="${todo ? 'color:var(--red)' : ''}">${all.length} 位個案${todo ? `，${todo} 位尚未處理` : all.length ? '，都已處理' : ''}</div></span>
+            ${todo ? `<button class="btn primary" data-h="${esc(l.id)}">處理</button>` : ''}<button class="btn" data-go="${l.date}">看那天</button><button class="icon-btn needs-net" data-del="${esc(l.id)}" aria-label="刪除這筆請假">${ICON.close}</button></div>`;
+        }).join('') : '<div class="muted">目前沒有安排請假</div>'}</div>`,
+      onClose: render,
+    });
+    const hint = () => {
+      const d = $('#ml-date').value, f = $('#ml-from').value, t = $('#ml-to').value;
+      if (!d || t <= f) { $('#ml-hint').textContent = ''; return; }
+      const n = leaveCases({ date: d, from: f, to: t }).length;
+      $('#ml-hint').textContent = U.weekday(d) > 5 ? '這天是週末' : `${md(d)}（${DAY_S[U.weekday(d)]}）${f}–${t} 共有 ${n} 位個案`;
+    };
+    ['#ml-date', '#ml-from', '#ml-to'].forEach(id => $(id).onchange = hint); hint();
+    $$('[data-preset]').forEach(b => b.onclick = () => { const [f, t] = b.dataset.preset.split('|'); $('#ml-from').value = f; $('#ml-to').value = t; hint(); });
+    $('#ml-add').onclick = async () => {
+      const d = $('#ml-date').value, f = $('#ml-from').value, t = $('#ml-to').value, reason = $('#ml-reason').value.trim();
+      if (!d) return ($('#ml-err').textContent = '請選擇日期');
+      if (t <= f) return ($('#ml-err').textContent = '結束時間要晚於開始時間');
+      if (myLeaves().some(l => l.date === d && f < l.to && t > l.from)) return ($('#ml-err').textContent = '這段時間已經有請假了');
+      const ok = await guard(() => S.save('settings', { id: 'leave_' + U.uid(''), value: { date: d, from: f, to: t, reason } }), `已新增 ${md(d)} ${f}–${t} 的請假`);
+      if (ok) { sheetOnClose = null; openMyLeaves(d); }
+    };
+    $$('#ml-list [data-del]').forEach(b => b.onclick = async () => { const ok = await guard(() => S.remove('settings', b.dataset.del), '已刪除這筆請假'); if (ok) { sheetOnClose = null; openMyLeaves(prefill); } });
+    $$('#ml-list [data-go]').forEach(b => b.onclick = () => { ui.view = 'day'; ui.date = b.dataset.go; U.LS.set('cs_view', 'day'); closeSheet(); });
+    $$('#ml-list [data-h]').forEach(b => b.onclick = () => { sheetOnClose = null; openReminder(b.dataset.h); });
+  }
+
+  // 請假提醒：列出還沒請假或找同事協助的個案，可一次處理
+  function openReminder(onlyId) {
+    const groups = (onlyId ? myLeaves().filter(l => l.id === onlyId).map(l => ({ l, todo: leaveCases(l).filter(x => !x.done) })) : upcomingPending());
+    U.LS.set('cs_reminded', realToday());
+    const bulk = [['sms', '已傳送簡訊請假'], ['parent', '已向家長請假']].concat(U.THERAPISTS.map(n => ['helper:' + n, `請${n}協助`]));
+    openSheet({
+      title: '請假提醒', sub: '這些個案還沒請假，也還沒找同事協助', wide: true,
+      body: groups.length ? groups.map((g, gi) => {
+        const du = daysUntil(g.l.date);
+        return `<div class="report" style="margin-bottom:12px">
+          <b class="num">${esc(leaveLabel(g.l))}</b> <span class="small muted">${du === 0 ? '今天' : du > 0 ? `還有 ${du} 天` : '已過'}</span>
+          <div class="list" style="margin-top:10px;background:var(--surface)">${g.todo.length ? g.todo.map(x => {
+            const c = S.caseOf(x.s);
+            return `<button class="item" data-open="${esc(x.s.id)}|${g.l.date}"><span class="num muted" style="min-width:3.2em">${x.t}</span><b>${esc(S.nameOf(x.s))}</b><span class="small muted">${c && c.phone ? esc(c.phone) : ''}</span></button>`;
+          }).join('') : '<div class="muted">都處理好了</div>'}</div>
+          ${g.todo.length ? `<div class="row" style="margin-top:10px"><span class="small">全部標為</span><select class="input" data-bulksel="${gi}" style="width:auto;min-height:40px">${bulk.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select><button class="btn primary needs-net" data-bulk="${gi}">套用</button></div>` : ''}
+        </div>`;
+      }).join('') + '<div class="hint">點個案名字可以單獨標記、複製或傳送請假簡訊。</div>'
+        : '<div class="report">7 天內的請假都已處理好了。</div>',
+      foot: '<button class="btn" id="rm-later">稍後再說</button>',
+      onClose: render,
+    });
+    $('#rm-later').onclick = closeSheet;
+    $$('[data-open]').forEach(b => b.onclick = () => { const [sid, d] = b.dataset.open.split('|'); sheetOnClose = null; openCase(sid, d, 1); });
+    $$('[data-bulk]').forEach(b => b.onclick = async () => {
+      const g = groups[+b.dataset.bulk], v = $(`[data-bulksel="${b.dataset.bulk}"]`).value;
+      const patch = v.startsWith('helper:') ? { status: 'helper', helper: v.slice(7) } : { status: v, helper: undefined };
+      const ok = await guard(async () => { for (const x of g.todo) await S.setMark(x.s, g.l.date, patch); }, `已將 ${g.todo.length} 位標為「${v.startsWith('helper:') ? '請' + v.slice(7) + '協助' : STATUS_LABEL[v]}」`);
+      if (ok) { sheetOnClose = null; openReminder(onlyId); }
+    });
+  }
+  function maybeRemind() {
+    if ($('#sheet-root').innerHTML || U.LS.get('cs_reminded', '') === realToday()) return;
+    if (upcomingPending().length) openReminder();
   }
 
   /* ---------- 請假簡訊 ---------- */
