@@ -973,16 +973,19 @@
   }
 
   /* ---------- 請假簡訊 ---------- */
-  const SMS_DEFAULT = `【職能治療課程異動通知】
+  const SMS_OLD = `【職能治療課程異動通知】
 親愛的家長您好：
 非常抱歉通知您，因職能治療劉奇鑫老師將於 00月00日（星期0）參與會議，當日職能治療課程將暫停一次，造成您的不便，敬請見諒。
 若您需要協助安排調課，或有任何相關問題，歡迎於上班時間來電洽詢，電話：04-7238595 分機 7019。
 感謝您的體諒與配合，祝您及家人平安順心！`;
+  const SMS_DEFAULT = `【職能治療課程異動通知】親愛的家長您好：非常抱歉通知您，因職能治療劉奇鑫老師將於 00月00日（星期0）參與會議，當日職能治療課程將暫停一次，敬請見諒。
+若您需要安排調課，或有任何相關問題，歡迎於上班時間來電洽詢，電話：04-7238595 分機 7019。感謝您的體諒與配合！`;
+  const smsTpl = () => { const t = S.setting('smsTemplate', ''); return !t || t === SMS_OLD ? SMS_DEFAULT : t; };
   const DATE_RE = /\d{1,2}\s*月\s*\d{1,2}\s*日\s*[（(]\s*星期\s*.\s*[）)]/;
   function smsText(date) {
     const x = U.parse(date);
     const dd = `${x.getMonth() + 1}月${x.getDate()}日（星期${DAY_S[U.weekday(date)]}）`;
-    const tpl = S.setting('smsTemplate', SMS_DEFAULT) || SMS_DEFAULT;
+    const tpl = smsTpl();
     return tpl.includes('{日期}') ? tpl.split('{日期}').join(dd) : tpl.replace(DATE_RE, dd);
   }
   function smsLink(s, date) {
@@ -1086,7 +1089,7 @@
     const sample = U.addDays(firstWorkday(realToday()), 0);
     openSheet({
       title: '請假簡訊範本', sub: '「00月00日（星期0）」會自動換成請假那天的日期',
-      body: `<textarea class="input" id="sms-tpl" rows="9">${esc(S.setting('smsTemplate', SMS_DEFAULT) || SMS_DEFAULT)}</textarea>
+      body: `<textarea class="input" id="sms-tpl" rows="9">${esc(smsTpl())}</textarea>
         <div class="hint" style="margin-top:6px">在個案的「請假・評估」頁面可以一鍵複製，或直接傳給家長。</div>
         <div class="section-label">預覽（以 ${md(sample)} 為例）</div><div class="report small" id="sms-sample" style="white-space:pre-wrap"></div>`,
       foot: '<button class="btn ghost" id="sms-reset" style="margin-right:auto">還原預設</button><button class="btn primary needs-net" id="sms-save">儲存</button>',
