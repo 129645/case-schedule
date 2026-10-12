@@ -368,3 +368,6 @@ textarea.input { min-height: 96px; resize: vertical; }
 .rl-n { white-space: nowrap; }
 .rl-n b { color: var(--red); }
 @media (max-width: 720px) { .rl-row { flex-wrap: wrap; gap: 4px 10px; } .rl-when { flex-basis: 100%; } .rl-n { margin-right: auto; } }
+
+.bd.moved { background: var(--blue-soft); color: var(--blue); }
+.tag.moved { background: var(--blue-soft); color: var(--blue); }

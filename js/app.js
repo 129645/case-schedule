@@ -36,8 +36,9 @@
     const t = U.pad(n.getHours()) + ':' + U.pad(n.getMinutes());
     return U.SLOT_TIMES.find(x => t >= x && t < U.endOf(x)) || null;
   }
-  const OFF = st => st === 'parent' || st === 'self' || st === 'sms';
-  const STATUS_LABEL = { parent: '已向家長請假', self: '個案自己請假', sms: '已傳送簡訊請假' };
+  const OFF = st => st === 'parent' || st === 'self' || st === 'sms' || st === 'moved';
+  const STATUS_LABEL = { parent: '已向家長請假', self: '個案自己請假', sms: '已傳送簡訊請假', moved: '已調課至其他日期' };
+  const whenText = (d, t) => `${md(d)}（${DAY_S[U.weekday(d)]}）${t}`;
 
   /* ---------- 我的請假時間（存在 settings，id 以 leave_ 開頭） ---------- */
   const myLeaves = () => S.data.settings.filter(x => String(x.id).startsWith('leave_') && x.value)
@@ -275,11 +276,13 @@
     let b = '';
     if (e.status === 'parent') b += `<span class="bd leave">${short ? '假' : '已請假'}</span>`;
     if (e.status === 'sms') b += `<span class="bd leave">訊</span>`;
+    if (e.status === 'moved') b += `<span class="bd moved">調</span>`;
+    if (s.makeupOf) b += `<span class="bd once">補</span>`;
     if (e.status === 'none' && leaveAt(d || "", s.time)) b += `<span class="bd todo">待</span>`;
     if (e.status === 'self') b += `<span class="bd leave">個假</span>`;
     if (e.status === 'helper' && e.helper) b += `<span class="bd help">${esc(e.helper[0])}</span>`;
     if (e.eval) b += '<span class="bd eval">評</span>';
-    if (s.only && s.only.length) b += '<span class="bd once">臨</span>';
+    if (s.only && s.only.length && !s.makeupOf) b += '<span class="bd once">臨</span>';
     if (s.note) b += '<span class="bd memo">備</span>';
     return b;
   }
@@ -293,7 +296,7 @@
     if (OFF(e.status)) cls.push('off');
     if (dimmed(e)) cls.push('dim');
     const name = S.nameOf(s);
-    const title = [name, s.note, e.status === 'helper' && e.helper ? '由' + e.helper + '協助' : ''].filter(Boolean).join('・');
+    const title = [name, s.note, e.status === 'helper' && e.helper ? '由' + e.helper + '協助' : '', e.status === 'moved' && e.mark.moveTo ? '已調課至 ' + whenText(e.mark.moveTo.date, e.mark.moveTo.time) : '', s.makeupOf ? '調課（原 ' + whenText(s.makeupOf.date, s.makeupOf.time) + '）' : ''].filter(Boolean).join('・');
     return `<button class="${cls.join(' ')}" data-slot="${esc(s.id)}" data-date="${d}" title="${esc(title)}"><span class="nm">${esc(name)}</span>${badges(s, e, d)}</button>`;
   }
 
@@ -381,12 +384,14 @@
     const tags = [];
     if (e.status === 'parent') tags.push('<span class="tag leave">已向家長請假</span>');
     if (e.status === 'sms') tags.push('<span class="tag leave">已傳送簡訊請假</span>');
+    if (e.status === 'moved') tags.push(`<span class="tag moved">已調課至 ${e.mark.moveTo ? whenText(e.mark.moveTo.date, e.mark.moveTo.time) : '其他日期'}</span>`);
+    if (s.makeupOf) tags.push(`<span class="tag once">調課（原 ${whenText(s.makeupOf.date, s.makeupOf.time)}）</span>`);
     if (e.status === 'none' && leaveAt(d, s.time)) tags.push('<span class="tag todo">你請假中・尚未處理</span>');
     if (e.status === 'self') tags.push('<span class="tag leave">個案自己請假</span>');
     if (e.status === 'helper' && e.helper) tags.push(`<span class="tag help">由${esc(e.helper)}協助</span>`);
     if (e.eval) tags.push('<span class="tag eval">需評估</span>');
     if (intern) tags.push(`<span class="tag ${'c-' + intern.color}">${esc(intern.name)}</span>`);
-    if (s.only && s.only.length) tags.push('<span class="tag once">只有特定日期</span>');
+    if (s.only && s.only.length && !s.makeupOf) tags.push('<span class="tag once">只有特定日期</span>');
     if (s.note) tags.push(`<span class="tag">${esc(s.note)}</span>`);
     const off = OFF(e.status);
     return `<button class="card ${off ? 'off' : ''} ${dimmed(e) ? 'chip dim' : ''}" data-slot="${esc(s.id)}" data-date="${d}" style="${dimmed(e) ? 'opacity:.3' : ''}">
@@ -544,13 +549,25 @@
 
   function leaveTab(body, s, date, repaint) {
     const e = S.effective(s, date);
-    const opts = [['none', '正常上課'], ['sms', '已傳送簡訊請假'], ['parent', '已向家長請假'], ['self', '個案自己請假']]
+    const opts = [['none', '正常上課'], ['sms', '已傳送簡訊請假'], ['parent', '已向家長請假'], ['self', '個案自己請假'], ['moved', '已調課至其他日期']]
       .concat(U.THERAPISTS.map(n => ['helper:' + n, `請${n}協助`]));
+    const mv = e.status === 'moved' ? e.mark.moveTo : null;
+    const tOpts = sel => U.SLOT_TIMES.map(t => `<option ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
     const cur = e.status === 'helper' ? 'helper:' + e.helper : e.status;
     const maxDate = U.addDays(date, 120);
     body.innerHTML = `
       <div class="section-label">${md(date)}（${DAY_S[U.weekday(date)]}）這一天</div>
-      <div class="options" role="radiogroup" id="st-opts">${opts.map(([v, l]) => optHTML(v, l, v === cur)).join('')}</div>
+      <div class="options" role="radiogroup" id="st-opts">${opts.map(([v, l]) => optHTML(v, l === '已調課至其他日期' && mv ? `已調課至 ${whenText(mv.date, mv.time)}` : l, v === cur)).join('')}</div>
+      <div class="report hidden" id="mv-box" style="margin-top:8px">
+        <b>調到哪一天、哪個時段？</b><div class="small muted">只調這一次，之後每週仍是原本的${DAY[s.day]} ${s.time}</div>
+        <div class="row" style="margin-top:10px">
+          <div class="field" style="margin:0"><label for="mv-date">新日期</label><input class="input num" type="date" id="mv-date" value="${mv ? mv.date : U.addDays(date, 1)}"></div>
+          <div class="field" style="margin:0;flex:0 1 130px"><label for="mv-time">新時段</label><select class="input num" id="mv-time">${tOpts(mv ? mv.time : s.time)}</select></div>
+        </div>
+        <div class="hint" id="mv-hint" style="margin-top:6px"></div>
+        <div class="err" id="mv-err2"></div>
+        <div class="row"><button class="btn primary needs-net" id="mv-ok">${mv ? '改成這個時間' : '確認調課'}</button><button class="btn ghost" id="mv-cancel">取消</button></div>
+      </div>
       ${s.helper ? `<div class="hint" style="margin-top:6px">每週固定由${esc(s.helper)}協助（可在「更動」修改）</div>` : ''}
       <div class="section-label">套用範圍</div>
       <div class="row">
@@ -597,10 +614,55 @@
     $('#rg-one', body).onclick = () => { range = false; $('#rg-one', body).setAttribute('aria-pressed', true); $('#rg-range', body).setAttribute('aria-pressed', false); toEl.classList.add('hidden'); hint(); };
     $('#rg-range', body).onclick = () => { range = true; $('#rg-range', body).setAttribute('aria-pressed', true); $('#rg-one', body).setAttribute('aria-pressed', false); toEl.classList.remove('hidden'); hint(); };
     toEl.oninput = hint;
+    // ---- 調課 ----
+    const box = $('#mv-box', body), mvDate = $('#mv-date', body), mvTime = $('#mv-time', body);
+    const mvHint = () => {
+      const d = mvDate.value, t = mvTime.value, h = $('#mv-hint', body);
+      if (!d) { h.textContent = ''; return; }
+      if (U.weekday(d) > 5) { h.textContent = '這天是週末，請選星期一到五'; return; }
+      const n = S.caseCount(d, t, e.mark.makeup);
+      const lv = leaveAt(d, t);
+      h.textContent = `${whenText(d, t)} 目前有 ${n} 位個案${n >= U.MAX_PER_SLOT ? '，已經滿了' : ''}${lv ? '；你這個時段請假' : ''}`;
+    };
+    mvDate.onchange = mvHint; mvTime.onchange = mvHint;
+    $('#mv-cancel', body).onclick = () => { box.classList.add('hidden'); };
+    $('#mv-ok', body).onclick = async () => {
+      const d = mvDate.value, t = mvTime.value, err = $('#mv-err2', body);
+      err.textContent = '';
+      if (!d) return (err.textContent = '請選擇新日期');
+      if (U.weekday(d) > 5) return (err.textContent = '請選星期一到五');
+      if (d === date && t === s.time) return (err.textContent = '新時間跟原本一樣');
+      if (S.caseCount(d, t, e.mark.makeup) >= U.MAX_PER_SLOT) return (err.textContent = `${whenText(d, t)} 已經有 6 位個案，請換一個時段`);
+      const c = S.caseOf(s);
+      const old = e.mark.makeup ? S.data.slots.find(x => x.id === e.mark.makeup) : null;
+      const makeup = Object.assign({}, old || { id: U.uid('s') }, {
+        kind: 'case', day: U.weekday(d), time: t, name: S.nameOf(s), caseId: c ? c.id : (s.caseId || null), note: s.note || '',
+        helper: '', intern: s.intern || '', only: [d], start: null, end: null, order: Date.now(), makeupOf: { slot: s.id, date, time: s.time },
+      });
+      const ok = await guard(async () => {
+        await S.save('slots', makeup);
+        await S.setMark(s, date, { status: 'moved', helper: undefined, moveTo: { date: d, time: t }, makeup: makeup.id });
+      }, `已調課至 ${whenText(d, t)}，之後每週仍照原時段`);
+      if (ok) repaint();
+    };
     $$('#st-opts .opt', body).forEach(b => {
       b.classList.add('needs-net');
       b.onclick = async () => {
         const v = b.dataset.val;
+        if (v === 'moved') { box.classList.remove('hidden'); mvHint(); box.scrollIntoView({ block: 'nearest' }); return; }
+        if (e.status === 'moved' && e.mark.makeup) {
+          // 取消調課：刪掉補課那一堂
+          const mk = e.mark.makeup;
+          const pre = { moveTo: undefined, makeup: undefined };
+          const p2 = v.startsWith('helper:') ? { status: 'helper', helper: v.slice(7) } : { status: v === 'none' && !s.helper ? undefined : v, helper: undefined };
+          const ok = await guard(async () => {
+            if (S.data.slots.some(x => x.id === mk)) await S.remove('slots', mk);
+            const mm = S.data.marks.filter(m => m.slot === mk).map(m => m.id); if (mm.length) await S.remove('marks', mm);
+            await S.setMark(s, date, Object.assign(pre, p2));
+          }, '已取消調課，補課那一堂已移除');
+          if (ok) repaint();
+          return;
+        }
         const patch = v.startsWith('helper:') ? { status: 'helper', helper: v.slice(7) } : { status: v, helper: undefined };
         if (v === 'none' && !s.helper) patch.status = undefined;
         const dates = range ? S.occurrences(s, date, toEl.value || date) : [date];
@@ -691,7 +753,12 @@
       $('#rm-no', body).onclick = repaint;
       $('#rm-yes', body).onclick = async () => {
         const marks = S.data.marks.filter(m => m.slot === s.id).map(m => m.id);
-        const ok = await guard(async () => { await S.remove('slots', s.id); if (marks.length) await S.remove('marks', marks); }, '已移除');
+        const ok = await guard(async () => {
+          await S.remove('slots', s.id); if (marks.length) await S.remove('marks', marks);
+          if (s.makeupOf) { const orig = S.data.slots.find(x => x.id === s.makeupOf.slot); if (orig) await S.setMark(orig, s.makeupOf.date, { status: undefined, moveTo: undefined, makeup: undefined }); }
+          // 移除的是原本的時段：一併移除它的補課
+          const mks = S.data.slots.filter(x => x.makeupOf && x.makeupOf.slot === s.id).map(x => x.id); if (mks.length) await S.remove('slots', mks);
+        }, '已移除');
         if (ok) closeSheet();
       };
     };

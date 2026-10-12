@@ -20,10 +20,12 @@
     const m = [];
     if (e.status === 'parent') m.push('假');
     if (e.status === 'sms') m.push('訊');
+    if (e.status === 'moved') m.push(e.mark && e.mark.moveTo ? '調→' + md(e.mark.moveTo.date) : '調');
     if (e.status === 'self') m.push('個假');
     if (e.status === 'helper' && e.helper) m.push(e.helper[0]);
     if (e.eval) m.push('評');
-    if (s.only && s.only.length) m.push('臨');
+    if (s.makeupOf) m.push('補，原' + md(s.makeupOf.date));
+    else if (s.only && s.only.length) m.push('臨');
     if (s.note) m.push(s.note);
     return m;
   }
@@ -35,7 +37,7 @@
         if (s.kind === 'note') return { note: true, text: s.text };
         const e = S.effective(s, d);
         const i = e.intern ? S.internById.get(e.intern) : null;
-        return { name: S.nameOf(s), marks: marksOf(s, e), color: i ? i.color : null, off: e.status === 'parent' || e.status === 'self' || e.status === 'sms' };
+        return { name: S.nameOf(s), marks: marksOf(s, e), color: i ? i.color : null, off: e.status === 'parent' || e.status === 'self' || e.status === 'sms' || e.status === 'moved' };
       })),
     }));
   }
@@ -49,7 +51,7 @@
     model.forEach(r => r.cells.forEach(c => c.forEach(x => { if (x.color) used.add(x.color); })));
     return S.data.interns.filter(i => used.has(i.color));
   };
-  const LEGEND = '標註：訊＝已傳送簡訊請假　假＝已向家長請假　個假＝個案自己請假　林／吳／蕭＝由該治療師協助　評＝需評估　臨＝只有特定日期　刪除線＝當天不上課';
+  const LEGEND = '標註：訊＝已傳送簡訊請假　假＝已向家長請假　個假＝個案自己請假　林／吳／蕭＝由該治療師協助　評＝需評估　臨＝只有特定日期　調＝已調課　補＝調課補上的那一堂　刪除線＝當天不上課';
 
   /* ---------- Word ---------- */
   async function word(dates) {
@@ -168,7 +170,7 @@
     const wb = X.utils.book_new();
     const today = U.fmt(new Date());
     const intern = id => (S.internById.get(id) || {}).name || '';
-    const STATUS = { sms: '已傳送簡訊請假', parent: '已向家長請假', self: '個案自己請假', helper: '請其他治療師協助', none: '正常上課' };
+    const STATUS = { moved: '已調課至其他日期', sms: '已傳送簡訊請假', parent: '已向家長請假', self: '個案自己請假', helper: '請其他治療師協助', none: '正常上課' };
     const cases = S.data.cases.slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')).map(c => ({
       姓名: c.name, 生日: c.birthday || '', 目前年齡: U.ageText(U.ageBetween(c.birthday, today)), 早產: c.preterm || '', 聯絡方式: c.phone || '', 聯絡方式2: c.phone2 || '', 備註: c.note || '',
     }));
