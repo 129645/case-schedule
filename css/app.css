@@ -359,3 +359,12 @@ textarea.input { min-height: 96px; resize: vertical; }
   .day-head .small-btn { margin-left: auto; }
   .leave-banner { flex-direction: column; align-items: flex-start; }
 }
+
+.banner.remind-list { background: var(--red-soft); padding: 10px 14px; }
+.rl-title { font-size: 13px; color: var(--red); font-weight: 600; margin-bottom: 4px; }
+.rl-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-top: 1px solid rgba(194, 65, 58, .15); }
+.rl-row:first-of-type { border-top: 0; }
+.rl-when { flex: 1; min-width: 0; }
+.rl-n { white-space: nowrap; }
+.rl-n b { color: var(--red); }
+@media (max-width: 720px) { .rl-row { flex-wrap: wrap; gap: 4px 10px; } .rl-when { flex-basis: 100%; } .rl-n { margin-right: auto; } }

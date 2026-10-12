@@ -217,11 +217,16 @@
   }
 
   function remindBannerHTML() {
-    const up = upcomingPending();
-    if (!up.length) return '';
-    const n = up.reduce((a, x) => a + x.todo.length, 0);
-    const first = up[0].l, du = daysUntil(first.date);
-    return `<div class="banner remind"><span>${du === 0 ? '今天' : du + ' 天後'}（${md(first.date)}）你要請假：還有 <b>${n}</b> 位個案尚未請假或找同事協助</span><button class="btn small-btn" id="remind-btn">查看</button></div>`;
+    // 列出本週與下週、每一筆請假各自還有幾位個案尚未處理
+    const today = realToday(), thisMon = U.mondayOf(firstWorkday(today)), endNext = U.addDays(thisMon, 11);
+    const rows = myLeaves().filter(l => l.date >= today && l.date <= endNext)
+      .map(l => ({ l, todo: leaveCases(l).filter(x => !x.done) })).filter(x => x.todo.length);
+    if (!rows.length) return '';
+    return `<div class="banner remind-list"><div class="rl-title">本週與下週的請假，以下個案尚未請假或找同事協助：</div>${rows.map(({ l, todo }) => {
+      const wk = U.mondayOf(l.date) === thisMon ? '本週' : '下週', du = daysUntil(l.date);
+      return `<div class="rl-row"><span class="rl-when"><b>${wk}${DAY_S[U.weekday(l.date)]}　${md(l.date)}</b>　<span class="num">${l.from}–${l.to}</span>${l.reason ? '　' + esc(l.reason) : ''}<span class="muted small">　${du === 0 ? '今天' : du + ' 天後'}</span></span>
+        <span class="rl-n">還有 <b>${todo.length}</b> 位</span><button class="btn small-btn" data-remind="${esc(l.id)}">查看</button></div>`;
+    }).join('')}</div>`;
   }
 
   function menuHTML() {
@@ -415,7 +420,7 @@
     $$('[data-jump]').forEach(b => b.onclick = () => { ui.date = U.addDays(ui.date, +b.dataset.jump); render(); });
     $$('[data-myleave]').forEach(b => b.onclick = () => openMyLeaves(b.dataset.myleave));
     $$('[data-handle]').forEach(b => b.onclick = () => openReminder(b.dataset.handle));
-    const rb2 = $('#remind-btn'); if (rb2) rb2.onclick = () => openReminder();
+    $$('[data-remind]').forEach(b => b.onclick = () => openReminder(b.dataset.remind));
   }
   const prevWorkday = d => { let x = U.addDays(d, -1); while (U.weekday(x) > 5) x = U.addDays(x, -1); return x; };
   const nextWorkday = d => { let x = U.addDays(d, 1); while (U.weekday(x) > 5) x = U.addDays(x, 1); return x; };
