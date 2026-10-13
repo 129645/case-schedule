@@ -17,6 +17,7 @@
     refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>',
     file: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 18v-6M9 15l3-3 3 3"/></svg>',
     pen: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
+    print: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/></svg>',
     export: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>',
   };
 
@@ -200,6 +201,7 @@
             <button id="v-week" aria-pressed="${ui.view === 'week'}">週</button>
             <button id="v-day" aria-pressed="${ui.view === 'day'}">日</button>
           </div>
+          <button class="icon-btn hide-sm" id="print-btn" aria-label="列印時間表">${ICON.print}</button>
           <button class="icon-btn hide-sm" id="export-btn" aria-label="匯出">${ICON.export}</button>
           <div class="menu-wrap">
             <button class="icon-btn" id="menu-btn" aria-label="更多功能" aria-expanded="${ui.menuOpen}">${ICON.more}</button>
@@ -233,6 +235,7 @@
   function menuHTML() {
     const net = S.remote ? ' class="needs-net"' : '';
     return `<div class="menu" role="menu">
+      <button data-m="print" role="menuitem">列印時間表（A4）</button>
       <button data-m="export" role="menuitem">匯出這週（Word／PDF）</button>
       <hr>
       <button data-m="roster" role="menuitem">個案名冊</button>
@@ -414,6 +417,7 @@
       if (nr) nr.scrollIntoView({ block: 'center' });
     };
     $('#export-btn').onclick = openExport;
+    $('#print-btn').onclick = () => openPrint();
     $('#menu-btn').onclick = e => { e.stopPropagation(); ui.menuOpen = !ui.menuOpen; render(); };
     $$('.menu [data-m]').forEach(b => b.onclick = () => { ui.menuOpen = false; render(); menuAction(b.dataset.m); });
     $$('[data-filter]').forEach(b => b.onclick = () => { const k = b.dataset.filter || null; ui.filter = ui.filter === k ? null : k; render(); });
@@ -437,6 +441,7 @@
 
   function menuAction(m) {
     if (m === 'export') return openExport();
+    if (m === 'print') return openPrint();
     if (m === 'roster') return openRoster();
     if (m === 'interns') return openInterns();
     if (m === 'memo') return openMemo();
@@ -1184,6 +1189,60 @@
       foot: '<button class="btn primary needs-net" id="memo-save">儲存</button>', onClose: render,
     });
     $('#memo-save').onclick = async () => { const ok = await guard(() => S.setSetting('memo', $('#memo').value), '已儲存'); if (ok) closeSheet(); };
+  }
+
+  /* ---------- 列印時間表 ---------- */
+  function openPrint() {
+    let mon = U.mondayOf(ui.date);
+    let orient = U.LS.get('cs_print_orient', 'landscape');
+    const thisMon = U.mondayOf(firstWorkday(realToday()));
+    openSheet({
+      title: '列印時間表', sub: '以週為單位，A4 一頁', wide: true,
+      body: `
+        <div class="row" style="justify-content:space-between">
+          <div class="row" style="gap:4px">
+            <button class="icon-btn" id="pr-prev" aria-label="上一週">${ICON.left}</button>
+            <b class="num" id="pr-label" style="min-width:9.5em;text-align:center"></b>
+            <button class="icon-btn" id="pr-next" aria-label="下一週">${ICON.right}</button>
+          </div>
+          <div class="row" style="gap:6px">
+            <button class="btn small-btn" data-pw="0">本週</button><button class="btn small-btn" data-pw="7">下週</button><button class="btn small-btn" data-pw="14">下下週</button>
+            <input class="input num" type="date" id="pr-date" aria-label="選擇日期" style="width:auto;min-height:32px;padding:4px 8px;font-size:14px">
+          </div>
+        </div>
+        <div class="row" style="margin-top:10px"><span class="small muted">紙張方向</span>
+          <div class="seg" role="group"><button id="pr-land" aria-pressed="${orient === 'landscape'}">A4 橫向</button><button id="pr-port" aria-pressed="${orient === 'portrait'}">A4 直向</button></div></div>
+        <div class="pr-wrap" id="pr-wrap"><div class="pr-paper" id="pr-paper"><iframe id="pr-frame" title="列印預覽"></iframe></div></div>
+        <div class="hint">預覽就是印出來的樣子。按「列印」後，在列印視窗選擇印表機；紙張請選 A4。手機上若無法直接列印，可改用「匯出」→ PDF 再列印。</div>`,
+      foot: '<button class="btn ghost" id="pr-cancel">取消</button><button class="btn primary" id="pr-go">列印</button>',
+      onClose: render,
+    });
+    const frame = $('#pr-frame');
+    const draw = () => {
+      const dates = [0, 1, 2, 3, 4].map(i => U.addDays(mon, i));
+      const wk = mon === thisMon ? '本週' : mon === U.addDays(thisMon, 7) ? '下週' : mon === U.addDays(thisMon, 14) ? '下下週' : mon === U.addDays(thisMon, -7) ? '上週' : '';
+      $('#pr-label').textContent = `${md(dates[0])} – ${md(dates[4])}${wk ? '（' + wk + '）' : ''}`;
+      $('#pr-date').value = mon;
+      const pg = window.Exporter.PAGE[orient];
+      const k = Math.min(1, ($('#pr-wrap').clientWidth - 24) / pg.w);
+      frame.style.width = pg.w + 'px'; frame.style.height = pg.h + 'px';
+      frame.style.transform = `scale(${k})`;
+      $('#pr-paper').style.width = pg.w * k + 'px'; $('#pr-paper').style.height = pg.h * k + 'px';
+      frame.srcdoc = window.Exporter.printDoc(dates, orient);
+    };
+    $('#pr-prev').onclick = () => { mon = U.addDays(mon, -7); draw(); };
+    $('#pr-next').onclick = () => { mon = U.addDays(mon, 7); draw(); };
+    $$('[data-pw]').forEach(b => b.onclick = () => { mon = U.addDays(thisMon, +b.dataset.pw); draw(); });
+    $('#pr-date').onchange = e => { if (e.target.value) { mon = U.mondayOf(e.target.value); draw(); } };
+    const setO = o => { orient = o; U.LS.set('cs_print_orient', o); $('#pr-land').setAttribute('aria-pressed', o === 'landscape'); $('#pr-port').setAttribute('aria-pressed', o === 'portrait'); draw(); };
+    $('#pr-land').onclick = () => setO('landscape');
+    $('#pr-port').onclick = () => setO('portrait');
+    $('#pr-cancel').onclick = closeSheet;
+    $('#pr-go').onclick = () => {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+      catch (e) { toast('這個瀏覽器無法直接列印，請改用「匯出」→ PDF'); }
+    };
+    draw();
   }
 
   /* ---------- 匯出 ---------- */

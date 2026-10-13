@@ -144,6 +144,23 @@
     </div>`;
   }
 
+  // 列印用的完整頁面（A4，自動縮放成一頁）
+  const PAGE = { landscape: { w: 1062, h: 726 }, portrait: { w: 726, h: 1062 } }; // A4 扣 8mm 邊界，96dpi
+  function printDoc(dates, orient) {
+    const pg = PAGE[orient] || PAGE.landscape;
+    const body = exportHTML(dates)
+      .replace('width:1123px;padding:26px 30px;', `width:${pg.w}px;padding:0;box-sizing:border-box;`)
+      .replace('匯出日期', '列印日期')
+      .replace(/#export-stage /g, '#pg ');
+    return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><title>${esc(titleOf(dates))}</title>
+      <style>@page{size:A4 ${orient === 'portrait' ? 'portrait' : 'landscape'};margin:8mm}html,body{margin:0;background:#fff}
+      *{-webkit-print-color-adjust:exact;print-color-adjust:exact}#pg{width:${pg.w}px}${orient === 'portrait' ? '#pg td{padding-top:10px !important;padding-bottom:10px !important}' : ''}</style></head>
+      <body><div id="pg">${body}</div>
+      <script>(function(){var W=${pg.w},H=${pg.h},el=document.getElementById('pg');
+        function fit(){el.style.zoom=1;var c=el.firstElementChild,h=c.offsetHeight,w=c.offsetWidth;var z=Math.min(1,H/h,W/w);el.style.zoom=z;}
+        fit();window.addEventListener('load',fit);window.addEventListener('beforeprint',fit);})();<\/script></body></html>`;
+  }
+
   async function pdf(dates) {
     await Promise.all([load('vendor/html2canvas.min.js'), load('vendor/jspdf.umd.min.js')]);
     const stage = document.getElementById('export-stage');
@@ -205,5 +222,5 @@
     return o.data;
   }
 
-  window.Exporter = { word, pdf, backup, readBackup, exportHTML };
+  window.Exporter = { word, pdf, backup, readBackup, exportHTML, printDoc, PAGE };
 })();
