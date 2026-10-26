@@ -210,6 +210,7 @@
         </div>
         <div class="sub-row" id="legend">${legendHTML(ui.view === 'week' ? dates : [ui.date])}</div>
         ${remindBannerHTML()}
+        ${internEndBannerHTML()}
         ${offline ? '<div class="banner">目前離線：顯示上次載入的排程，只能查看，不能修改。</div>' : ''}
         ${!S.remote ? '<div class="banner">示範模式：資料只存在這台裝置。設定好 Google 試算表後，電腦與手機就會同步。</div>' : ''}
       </header>
@@ -217,6 +218,16 @@
     const tb = $('#topbar');
     document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
     bindMain();
+  }
+
+  function internEndBannerHTML() {
+    const today = realToday();
+    const soon = S.data.interns.filter(i => i.end && i.end >= today && daysUntil(i.end) <= 7 && internCaseCount(i.id));
+    if (!soon.length) return '';
+    return `<div class="banner intern-end">${soon.map(i => {
+      const du = daysUntil(i.end);
+      return `<div class="rl-row"><span class="rl-when"><span class="sw c-${i.color}" style="display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px"></span><b>${esc(i.name)}</b> 將於 ${md(i.end)}（${du === 0 ? '今天' : du + ' 天後'}）結束實習，之後 ${internCaseCount(i.id)} 位個案會自動歸還給你</span><button class="btn small-btn" data-interns>查看</button></div>`;
+    }).join('')}</div>`;
   }
 
   function remindBannerHTML() {
@@ -263,7 +274,7 @@
     const chip = (key, label, n, sw) => `<button class="legend-chip" data-filter="${esc(key)}" aria-pressed="${ui.filter === key}">${sw ? `<span class="sw ${sw}"></span>` : ''}${esc(label)} <b class="num">${n}</b></button>`;
     let html = chip('', '全部', total, '');
     html += chip('__self', '自己', self, '');
-    for (const i of S.data.interns) html += chip(i.id, i.name, counts.get(i.id) || 0, 'c-' + i.color);
+    for (const i of S.data.interns) if (dates.some(d => S.internActive(i.id, d))) html += chip(i.id, i.name, counts.get(i.id) || 0, 'c-' + i.color);
     const sync = S.remote && S.lastSync ? `<span class="sync-note"><span class="hide-sm">更新於 ${new Date(S.lastSync).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}</span><button class="icon-btn" id="refresh-btn" aria-label="重新載入" style="width:30px;height:30px;vertical-align:middle">${ICON.refresh}</button></span>` : '';
     return html + sync;
   }
@@ -430,6 +441,7 @@
     $$('[data-myleave]').forEach(b => b.onclick = () => openMyLeaves(b.dataset.myleave));
     $$('[data-handle]').forEach(b => b.onclick = () => openReminder(b.dataset.handle));
     $$('[data-remind]').forEach(b => b.onclick = () => openReminder(b.dataset.remind));
+    $$('[data-interns]').forEach(b => b.onclick = () => openInterns());
   }
   const prevWorkday = d => { let x = U.addDays(d, -1); while (U.weekday(x) > 5) x = U.addDays(x, -1); return x; };
   const nextWorkday = d => { let x = U.addDays(d, 1); while (U.weekday(x) > 5) x = U.addDays(x, 1); return x; };
@@ -695,8 +707,9 @@
       <div class="section-label">分派給</div>
       <div class="options" role="radiogroup" id="in-opts">
         ${optHTML('', '自己做（不分派）', !e.intern, '<span class="sw"></span>')}
-        ${S.data.interns.map(i => optHTML(i.id, esc(i.name), e.intern === i.id, `<span class="sw c-${i.color}"></span>`)).join('')}
+        ${S.data.interns.filter(i => S.internActive(i.id, date)).map(i => optHTML(i.id, esc(i.name) + (i.end ? `<span class="small muted">　實習到 ${md(i.end)}</span>` : ''), e.intern === i.id, `<span class="sw c-${i.color}"></span>`)).join('')}
       </div>
+      ${S.data.interns.some(i => !S.internActive(i.id, date)) ? `<div class="hint" style="margin-top:6px">只列出 ${md(date)} 在實習期間內的實習生；實習期間外的個案會自動由你負責。</div>` : ''}
       <div class="section-label">套用範圍</div>
       <div class="seg" role="group"><button id="sc-once" aria-pressed="false">只有這次</button><button id="sc-weekly" aria-pressed="true">每週都是</button></div>
       <div class="hint" style="margin-top:8px">目前每週固定：${weeklyIntern && internOf(weeklyIntern) ? esc(internOf(weeklyIntern).name) : '自己做'}${hasOverride ? `；${md(date)} 這次另外指定` : ''}</div>`;
@@ -846,35 +859,89 @@
   }
 
   /* ---------- 實習生 ---------- */
+  function internStatus(i) {
+    const t = realToday();
+    if (i.start && t < i.start) return { key: 'wait', text: `${md(i.start)} 開始` };
+    if (i.end && t > i.end) return { key: 'done', text: `已於 ${md(i.end)} 結束，個案已歸還` };
+    return { key: 'on', text: i.end ? `實習中，到 ${md(i.end)}` : '實習中（未設定結束日）' };
+  }
+  const internCaseCount = id => new Set(S.data.slots.filter(s => s.kind === 'case' && s.intern === id).map(s => S.nameOf(s))).size;
+
   function openInterns(after) {
     const draw = () => {
       const used = new Set(S.data.interns.map(i => i.color));
       const free = U.PALETTE.find(p => !used.has(p.key)) || U.PALETTE[0];
+      const today = realToday();
       openSheet({
-        title: '實習生與顏色', sub: '分派給實習生的個案會顯示他的顏色',
+        title: '實習生與顏色', sub: '設定實習期間，期間結束後個案會自動歸還給你', wide: true,
         body: `
-          <div class="list" id="in-list">${S.data.interns.length ? S.data.interns.map(i => `
-            <div data-id="${esc(i.id)}"><span class="sw c-${i.color}" style="width:22px;height:22px;border-radius:6px;flex:none"></span>
-              <input class="input" value="${esc(i.name)}" data-rename style="min-height:38px">
-              <select class="input" data-color style="width:auto;min-height:38px">${U.PALETTE.map(p => `<option value="${p.key}" ${p.key === i.color ? 'selected' : ''}>${p.name}</option>`).join('')}</select>
-              <button class="icon-btn needs-net" data-del aria-label="刪除 ${esc(i.name)}">${ICON.close}</button></div>`).join('') : '<div class="muted">還沒有實習生</div>'}</div>
+          <div id="in-list">${S.data.interns.length ? S.data.interns.map(i => {
+            const st = internStatus(i), n = internCaseCount(i.id);
+            return `<div class="intern-card ${st.key === 'done' ? 'is-done' : ''}" data-id="${esc(i.id)}">
+              <div class="row">
+                <span class="sw c-${i.color}" style="width:22px;height:22px;border-radius:6px;flex:none"></span>
+                <input class="input" value="${esc(i.name)}" data-rename style="min-height:38px;flex:1;min-width:120px" aria-label="姓名">
+                <select class="input" data-color style="width:auto;min-height:38px" aria-label="顏色">${U.PALETTE.map(p => `<option value="${p.key}" ${p.key === i.color ? 'selected' : ''}>${p.name}</option>`).join('')}</select>
+                <button class="icon-btn needs-net" data-del aria-label="刪除 ${esc(i.name)}">${ICON.close}</button>
+              </div>
+              <div class="row" style="margin-top:8px">
+                <label class="small muted">實習期間</label>
+                <input class="input num" type="date" data-start value="${esc(i.start || '')}" style="width:auto;min-height:36px" aria-label="開始日">
+                <span class="muted">～</span>
+                <input class="input num" type="date" data-end value="${esc(i.end || '')}" style="width:auto;min-height:36px" aria-label="結束日">
+              </div>
+              <div class="row" style="margin-top:8px;justify-content:space-between">
+                <span class="small ${st.key === 'on' ? '' : 'muted'}">${esc(st.text)}${n ? `・每週負責 ${n} 位個案` : ''}</span>
+                ${st.key !== 'done' && n ? `<button class="btn small-btn needs-net" data-return>歸還給老師</button>` : ''}
+              </div>
+              <div class="return-confirm hidden" data-confirm></div>
+            </div>`;
+          }).join('') : '<div class="muted">還沒有實習生</div>'}</div>
           <div class="section-label">新增實習生</div>
           <div class="row"><input class="input" id="in-name" placeholder="實習生姓名" style="flex:2;min-width:140px">
-            <select class="input" id="in-color" style="flex:1;min-width:120px">${U.PALETTE.map(p => `<option value="${p.key}" ${p.key === free.key ? 'selected' : ''}>${p.name}</option>`).join('')}</select>
+            <select class="input" id="in-color" style="flex:1;min-width:120px">${U.PALETTE.map(p => `<option value="${p.key}" ${p.key === free.key ? 'selected' : ''}>${p.name}</option>`).join('')}</select></div>
+          <div class="row" style="margin-top:8px"><label class="small muted">實習期間</label>
+            <input class="input num" type="date" id="in-start" value="" style="width:auto;min-height:40px" aria-label="開始日">
+            <span class="muted">～</span>
+            <input class="input num" type="date" id="in-end" style="width:auto;min-height:40px" aria-label="結束日">
             <button class="btn primary needs-net" id="in-add">新增</button></div>
+          <div class="hint">開始日、結束日都可以先空著，之後再補。結束日過後，分派給他的個案會自動變回由你負責。</div>
           <div class="err" id="in-err"></div>`,
         onClose: after || render,
       });
       $('#in-add').onclick = async () => {
-        const name = $('#in-name').value.trim();
+        const name = $('#in-name').value.trim(), st = $('#in-start').value, en = $('#in-end').value;
         if (!name) return ($('#in-err').textContent = '請輸入姓名');
-        const ok = await guard(() => S.save('interns', { id: U.uid('i'), name, color: $('#in-color').value }), `已新增 ${name}`);
+        if (st && en && en < st) return ($('#in-err').textContent = '結束日不能早於開始日');
+        const ok = await guard(() => S.save('interns', { id: U.uid('i'), name, color: $('#in-color').value, start: st || '', end: en || '' }), `已新增 ${name}`);
         if (ok) { sheetOnClose = null; draw(); }
       };
       $$('#in-list [data-id]').forEach(row => {
         const id = row.dataset.id, it = S.internById.get(id);
+        const redraw = ok => { if (ok) { sheetOnClose = null; draw(); } };
         $('[data-rename]', row).onchange = e => guard(() => S.save('interns', Object.assign({}, it, { name: e.target.value.trim() || it.name })), '已改名');
-        $('[data-color]', row).onchange = async e => { const ok = await guard(() => S.save('interns', Object.assign({}, it, { color: e.target.value })), '已換顏色'); if (ok) { sheetOnClose = null; draw(); } };
+        $('[data-color]', row).onchange = async e => redraw(await guard(() => S.save('interns', Object.assign({}, it, { color: e.target.value })), '已換顏色'));
+        const saveDates = async () => {
+          const st = $('[data-start]', row).value, en = $('[data-end]', row).value;
+          if (st && en && en < st) { toast('結束日不能早於開始日'); return; }
+          redraw(await guard(() => S.save('interns', Object.assign({}, it, { start: st, end: en })), en ? `${it.name} 實習到 ${md(en)}` : '已儲存實習期間'));
+        };
+        $('[data-start]', row).onchange = saveDates;
+        $('[data-end]', row).onchange = saveDates;
+        const rb = $('[data-return]', row);
+        if (rb) rb.onclick = () => {
+          const n = internCaseCount(id), box = $('[data-confirm]', row);
+          box.classList.remove('hidden');
+          box.innerHTML = `<div class="report small" style="margin-top:8px">從今天（${md(today)}）起，${esc(it.name)} 負責的 ${n} 位個案會歸還給你，之前的紀錄仍會保留。
+            <div class="row" style="margin-top:8px"><button class="btn primary small-btn" data-yes>確定歸還</button><button class="btn ghost small-btn" data-no>取消</button></div></div>`;
+          $('[data-no]', box).onclick = () => box.classList.add('hidden');
+          $('[data-yes]', box).onclick = async () => {
+            const end = U.addDays(today, -1);
+            const patch = { end };
+            if (it.start && it.start > end) patch.start = end; // 還沒開始就歸還
+            redraw(await guard(() => S.save('interns', Object.assign({}, it, patch)), `已歸還：${it.name} 的 ${n} 位個案從今天起由你負責`));
+          };
+        };
         $('[data-del]', row).onclick = async () => {
           const ok = await guard(async () => {
             await S.remove('interns', id);
@@ -883,7 +950,7 @@
             const mk = S.data.marks.filter(m => m.intern === id).map(m => Object.assign({}, m, { intern: undefined }));
             for (const m of mk) { const sl2 = S.data.slots.find(x => x.id === m.slot); if (sl2) await S.setMark(sl2, m.date, { intern: undefined }); }
           }, `已刪除 ${it.name}，他的個案改回自己做`);
-          if (ok) { sheetOnClose = null; draw(); }
+          redraw(ok);
         };
       });
     };

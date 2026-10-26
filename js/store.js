@@ -146,8 +146,14 @@
       const m = this.markById.get(slot.id + '|' + date) || {};
       let status = m.status || (slot.helper ? 'helper' : 'none');
       const helper = m.status === 'helper' ? m.helper : (m.status ? '' : slot.helper || '');
-      const intern = (m.intern !== undefined && m.intern !== null) ? m.intern : (slot.intern || '');
+      let intern = (m.intern !== undefined && m.intern !== null) ? m.intern : (slot.intern || '');
+      if (intern && !this.internActive(intern, date)) intern = ''; // 實習期間外，自動歸還給老師
       return { status, helper, intern, eval: !!m.eval, mark: m };
+    },
+    internActive(id, date) {
+      const i = this.internById && this.internById.get(id);
+      if (!i) return false;
+      return !(i.start && date < i.start) && !(i.end && date > i.end);
     },
     async setMark(slot, date, patch) {
       const id = slot.id + '|' + date;

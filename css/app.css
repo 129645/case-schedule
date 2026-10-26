@@ -376,3 +376,8 @@ textarea.input { min-height: 96px; resize: vertical; }
 .pr-wrap { margin: 14px 0 10px; padding: 12px; background: var(--surface-2); border-radius: 12px; display: flex; justify-content: center; overflow: hidden; }
 .pr-paper { background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.15); position: relative; overflow: hidden; }
 .pr-paper iframe { border: 0; transform-origin: top left; position: absolute; left: 0; top: 0; background: #fff; }
+
+/* ---------- 實習期間 ---------- */
+.intern-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
+.intern-card.is-done { background: var(--surface-2); }
+.banner.intern-end { background: var(--blue-soft); padding: 8px 14px; }
