@@ -20,6 +20,7 @@
     const m = [];
     if (e.status === 'parent') m.push('假');
     if (e.status === 'sms') m.push('訊');
+    if (e.status === 'student') m.push('生' + ((S.internById.get(e.student) || {}).name || '') + '／督' + (e.sup || '').slice(0, 1));
     if (e.status === 'moved') m.push(e.mark && e.mark.moveTo ? '調→' + md(e.mark.moveTo.date) : '調');
     if (e.status === 'self') m.push('個假');
     if (e.status === 'helper' && e.helper) m.push(e.helper[0]);
@@ -51,7 +52,7 @@
     model.forEach(r => r.cells.forEach(c => c.forEach(x => { if (x.color) used.add(x.color); })));
     return S.data.interns.filter(i => used.has(i.color));
   };
-  const LEGEND = '標註：訊＝已傳送簡訊請假　假＝已向家長請假　個假＝個案自己請假　林／吳／蕭＝由該治療師協助　評＝需評估　臨＝只有特定日期　調＝已調課　補＝調課補上的那一堂　刪除線＝當天不上課';
+  const LEGEND = '標註：訊＝已傳送簡訊請假　假＝已向家長請假　個假＝個案自己請假　林／吳／蕭＝由該治療師協助　生＝由學生協助（督＝督導老師）　評＝需評估　臨＝只有特定日期　調＝已調課　補＝調課補上的那一堂　刪除線＝當天不上課';
 
   /* ---------- Word ---------- */
   async function word(dates) {
@@ -187,7 +188,7 @@
     const wb = X.utils.book_new();
     const today = U.fmt(new Date());
     const intern = id => (S.internById.get(id) || {}).name || '';
-    const STATUS = { moved: '已調課至其他日期', sms: '已傳送簡訊請假', parent: '已向家長請假', self: '個案自己請假', helper: '請其他治療師協助', none: '正常上課' };
+    const STATUS = { student: '請學生協助', moved: '已調課至其他日期', sms: '已傳送簡訊請假', parent: '已向家長請假', self: '個案自己請假', helper: '請其他治療師協助', none: '正常上課' };
     const cases = S.data.cases.slice().sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')).map(c => ({
       姓名: c.name, 生日: c.birthday || '', 目前年齡: U.ageText(U.ageBetween(c.birthday, today)), 早產: c.preterm || '', 聯絡方式: c.phone || '', 聯絡方式2: c.phone2 || '', 備註: c.note || '',
     }));

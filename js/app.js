@@ -38,7 +38,8 @@
     return U.SLOT_TIMES.find(x => t >= x && t < U.endOf(x)) || null;
   }
   const OFF = st => st === 'parent' || st === 'self' || st === 'sms' || st === 'moved';
-  const STATUS_LABEL = { parent: '已向家長請假', self: '個案自己請假', sms: '已傳送簡訊請假', moved: '已調課至其他日期' };
+  const STATUS_LABEL = { student: '請學生協助', parent: '已向家長請假', self: '個案自己請假', sms: '已傳送簡訊請假', moved: '已調課至其他日期' };
+  const studentName = id => (S.internById.get(id) || {}).name || '學生';
   const whenText = (d, t) => `${md(d)}（${DAY_S[U.weekday(d)]}）${t}`;
 
   /* ---------- 我的請假時間（存在 settings，id 以 leave_ 開頭） ---------- */
@@ -291,6 +292,7 @@
     if (e.status === 'parent') b += `<span class="bd leave">${short ? '假' : '已請假'}</span>`;
     if (e.status === 'sms') b += `<span class="bd leave">訊</span>`;
     if (e.status === 'moved') b += `<span class="bd moved">調</span>`;
+    if (e.status === 'student') b += `<span class="bd help">生</span>`;
     if (s.makeupOf) b += `<span class="bd once">補</span>`;
     if (e.status === 'none' && leaveAt(d || "", s.time)) b += `<span class="bd todo">待</span>`;
     if (e.status === 'self') b += `<span class="bd leave">個假</span>`;
@@ -310,7 +312,7 @@
     if (OFF(e.status)) cls.push('off');
     if (dimmed(e)) cls.push('dim');
     const name = S.nameOf(s);
-    const title = [name, s.note, e.status === 'helper' && e.helper ? '由' + e.helper + '協助' : '', e.status === 'moved' && e.mark.moveTo ? '已調課至 ' + whenText(e.mark.moveTo.date, e.mark.moveTo.time) : '', s.makeupOf ? '調課（原 ' + whenText(s.makeupOf.date, s.makeupOf.time) + '）' : ''].filter(Boolean).join('・');
+    const title = [name, s.note, e.status === 'helper' && e.helper ? '由' + e.helper + '協助' : '', e.status === 'student' ? `由學生${studentName(e.student)}協助（${e.sup}督導）` : '', e.status === 'moved' && e.mark.moveTo ? '已調課至 ' + whenText(e.mark.moveTo.date, e.mark.moveTo.time) : '', s.makeupOf ? '調課（原 ' + whenText(s.makeupOf.date, s.makeupOf.time) + '）' : ''].filter(Boolean).join('・');
     return `<button class="${cls.join(' ')}" data-slot="${esc(s.id)}" data-date="${d}" title="${esc(title)}"><span class="nm">${esc(name)}</span>${badges(s, e, d)}</button>`;
   }
 
@@ -398,6 +400,7 @@
     const tags = [];
     if (e.status === 'parent') tags.push('<span class="tag leave">已向家長請假</span>');
     if (e.status === 'sms') tags.push('<span class="tag leave">已傳送簡訊請假</span>');
+    if (e.status === 'student') tags.push(`<span class="tag help">由學生${esc(studentName(e.student))}協助・${esc(e.sup)}督導</span>`);
     if (e.status === 'moved') tags.push(`<span class="tag moved">已調課至 ${e.mark.moveTo ? whenText(e.mark.moveTo.date, e.mark.moveTo.time) : '其他日期'}</span>`);
     if (s.makeupOf) tags.push(`<span class="tag once">調課（原 ${whenText(s.makeupOf.date, s.makeupOf.time)}）</span>`);
     if (e.status === 'none' && leaveAt(d, s.time)) tags.push('<span class="tag todo">你請假中・尚未處理</span>');
@@ -567,14 +570,25 @@
   function leaveTab(body, s, date, repaint) {
     const e = S.effective(s, date);
     const opts = [['none', '正常上課'], ['sms', '已傳送簡訊請假'], ['parent', '已向家長請假'], ['self', '個案自己請假'], ['moved', '已調課至其他日期']]
-      .concat(U.THERAPISTS.map(n => ['helper:' + n, `請${n}協助`]));
+      .concat(U.THERAPISTS.map(n => ['helper:' + n, `請${n}協助`])).concat([['student', '請學生協助']]);
+    const stuNow = S.data.interns.filter(i => S.internActive(i.id, date));
     const mv = e.status === 'moved' ? e.mark.moveTo : null;
     const tOpts = sel => U.SLOT_TIMES.map(t => `<option ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
     const cur = e.status === 'helper' ? 'helper:' + e.helper : e.status;
     const maxDate = U.addDays(date, 120);
     body.innerHTML = `
       <div class="section-label">${md(date)}（${DAY_S[U.weekday(date)]}）這一天</div>
-      <div class="options" role="radiogroup" id="st-opts">${opts.map(([v, l]) => optHTML(v, l === '已調課至其他日期' && mv ? `已調課至 ${whenText(mv.date, mv.time)}` : l, v === cur)).join('')}</div>
+      <div class="options" role="radiogroup" id="st-opts">${opts.map(([v, l]) => optHTML(v, l === '已調課至其他日期' && mv ? `已調課至 ${whenText(mv.date, mv.time)}` : v === 'student' && e.status === 'student' ? `請學生協助：${esc(studentName(e.student))}（${esc(e.sup)}督導）` : l, v === cur)).join('')}</div>
+      <div class="report hidden" id="stu-box" style="margin-top:8px">
+        ${stuNow.length ? `<b>哪一位學生協助？</b>
+        <div class="opt-grid" id="stu-pick" style="margin-top:8px">${stuNow.map(i => `<button class="opt" role="radio" data-stu="${esc(i.id)}" aria-checked="${(e.status === 'student' ? e.student : stuNow.length === 1 ? i.id : '') === i.id}"><span class="sw c-${i.color}"></span><span>${esc(i.name)}</span></button>`).join('')}</div>
+        <b style="display:block;margin-top:12px">由哪位老師在場督導？</b>
+        <div class="opt-grid" id="sup-pick" style="margin-top:8px">${U.THERAPISTS.map(n => `<button class="opt" role="radio" data-sup="${n}" aria-checked="${e.status === 'student' && e.sup === n}"><span class="dot"></span><span>${n}</span></button>`).join('')}</div>
+        <div class="err" id="stu-err"></div>
+        <div class="row"><button class="btn primary needs-net" id="stu-ok">確認</button><button class="btn ghost" id="stu-cancel">取消</button></div>
+        <div class="hint" style="margin-top:6px">確認後，可以按下方「寄信給協助同事」通知督導老師和學生。</div>`
+        : `<b>${md(date)} 沒有在實習期間內的學生</b><div class="small muted" style="margin-top:4px">請先到「⋯」→「實習生與顏色」新增學生或設定實習期間。</div><div class="row" style="margin-top:8px"><button class="btn ghost" id="stu-cancel">關閉</button></div>`}
+      </div>
       <div class="report hidden" id="mv-box" style="margin-top:8px">
         <b>調到哪一天、哪個時段？</b><div class="small muted">只調這一次，之後每週仍是原本的${DAY[s.day]} ${s.time}</div>
         <div class="row" style="margin-top:10px">
@@ -662,15 +676,39 @@
       }, `已調課至 ${whenText(d, t)}，之後每週仍照原時段`);
       if (ok) repaint();
     };
+    // ---- 請學生協助 ----
+    const stuBox = $('#stu-box', body);
+    const pickOne = (sel, el) => { $$(sel, body).forEach(x => x.setAttribute('aria-checked', x === el)); };
+    $$('#stu-pick [data-stu]', body).forEach(x => x.onclick = () => pickOne('#stu-pick [data-stu]', x));
+    $$('#sup-pick [data-sup]', body).forEach(x => x.onclick = () => pickOne('#sup-pick [data-sup]', x));
+    $('#stu-cancel', body).onclick = () => stuBox.classList.add('hidden');
+    const stuOk = $('#stu-ok', body);
+    if (stuOk) stuOk.onclick = async () => {
+      const st = $('#stu-pick [aria-checked="true"]', body), sp = $('#sup-pick [aria-checked="true"]', body), err = $('#stu-err', body);
+      if (!st) return (err.textContent = '請選擇一位學生');
+      if (!sp) return (err.textContent = '請選擇督導老師');
+      const sid = st.dataset.stu, sup = sp.dataset.sup;
+      let dates = range ? S.occurrences(s, date, toEl.value || date) : [date];
+      const skip = dates.filter(d => !S.internActive(sid, d));
+      dates = dates.filter(d => S.internActive(sid, d));
+      if (!dates.length) return (err.textContent = '這段日期不在這位學生的實習期間內');
+      const clean = e.status === 'moved' && e.mark.makeup ? e.mark.makeup : null;
+      const ok = await guard(async () => {
+        if (clean && S.data.slots.some(x => x.id === clean)) await S.remove('slots', clean);
+        for (const d of dates) await S.setMark(s, d, { status: 'student', student: sid, sup, helper: undefined, moveTo: undefined, makeup: undefined });
+      }, `已安排學生${studentName(sid)}協助（${sup}督導）${dates.length > 1 ? `，共 ${dates.length} 次` : ''}${skip.length ? `；${skip.map(md).join('、')} 不在實習期間，未套用` : ''}`);
+      if (ok) repaint();
+    };
     $$('#st-opts .opt', body).forEach(b => {
       b.classList.add('needs-net');
       b.onclick = async () => {
         const v = b.dataset.val;
+        if (v === 'student') { stuBox.classList.remove('hidden'); $('#mv-box', body).classList.add('hidden'); stuBox.scrollIntoView({ block: 'nearest' }); return; }
         if (v === 'moved') { box.classList.remove('hidden'); mvHint(); box.scrollIntoView({ block: 'nearest' }); return; }
         if (e.status === 'moved' && e.mark.makeup) {
           // 取消調課：刪掉補課那一堂
           const mk = e.mark.makeup;
-          const pre = { moveTo: undefined, makeup: undefined };
+          const pre = { moveTo: undefined, makeup: undefined, student: undefined, sup: undefined };
           const p2 = v.startsWith('helper:') ? { status: 'helper', helper: v.slice(7) } : { status: v === 'none' && !s.helper ? undefined : v, helper: undefined };
           const ok = await guard(async () => {
             if (S.data.slots.some(x => x.id === mk)) await S.remove('slots', mk);
@@ -681,6 +719,7 @@
           return;
         }
         const patch = v.startsWith('helper:') ? { status: 'helper', helper: v.slice(7) } : { status: v, helper: undefined };
+        patch.student = undefined; patch.sup = undefined;
         if (v === 'none' && !s.helper) patch.status = undefined;
         const dates = range ? S.occurrences(s, date, toEl.value || date) : [date];
         const ok = await guard(async () => { for (const d of dates) await S.setMark(s, d, patch); },
@@ -889,6 +928,7 @@
                 <input class="input num" type="date" data-start value="${esc(i.start || '')}" style="width:auto;min-height:36px" aria-label="開始日">
                 <span class="muted">～</span>
                 <input class="input num" type="date" data-end value="${esc(i.end || '')}" style="width:auto;min-height:36px" aria-label="結束日">
+                <input class="input" type="email" data-email value="${esc(i.email || '')}" placeholder="email（選填，寄通知用）" style="flex:1;min-width:180px;min-height:36px" aria-label="email">
               </div>
               <div class="row" style="margin-top:8px;justify-content:space-between">
                 <span class="small ${st.key === 'on' ? '' : 'muted'}">${esc(st.text)}${n ? `・每週負責 ${n} 位個案` : ''}</span>
@@ -927,6 +967,7 @@
           redraw(await guard(() => S.save('interns', Object.assign({}, it, { start: st, end: en })), en ? `${it.name} 實習到 ${md(en)}` : '已儲存實習期間'));
         };
         $('[data-start]', row).onchange = saveDates;
+        $('[data-email]', row).onchange = e => guard(() => S.save('interns', Object.assign({}, it, { email: e.target.value.trim() })), '已儲存 email');
         $('[data-end]', row).onchange = saveDates;
         const rb = $('[data-return]', row);
         if (rb) rb.onclick = () => {
@@ -1166,6 +1207,42 @@
     Object.values(out).forEach(a => a.sort((x, y) => x.date.localeCompare(y.date) || x.time.localeCompare(y.time)));
     return out;
   }
+  function studentList(from, to) {
+    const out = [];
+    for (let d = from; d <= to; d = U.addDays(d, 1)) {
+      if (U.weekday(d) > 5) continue;
+      for (const s of S.data.slots) {
+        if (s.kind !== 'case' || !S.activeOn(s, d)) continue;
+        const e = S.effective(s, d);
+        if (e.status !== 'student' || !e.student) continue;
+        const c = S.caseOf(s);
+        out.push({ date: d, time: s.time, name: S.nameOf(s), age: c && c.birthday ? U.ageText(U.ageBetween(c.birthday, d)) : '', student: e.student, sup: e.sup });
+      }
+    }
+    return out.sort((x, y) => x.date.localeCompare(y.date) || x.time.localeCompare(y.time));
+  }
+  function dateLines(items, extra) {
+    const byDate = {}, lines = [];
+    items.forEach(it => { (byDate[it.date] = byDate[it.date] || []).push(it); });
+    Object.keys(byDate).sort().forEach(d => {
+      const x = U.parse(d);
+      lines.push(`■ ${x.getMonth() + 1}月${x.getDate()}日（星期${DAY_S[U.weekday(d)]}）`);
+      byDate[d].forEach(it => lines.push(`　${it.time}–${U.endOf(it.time)}　${it.name}${it.age ? `（${it.age}）` : ''}${extra ? extra(it) : ''}`));
+      lines.push('');
+    });
+    return lines;
+  }
+  function supMailBody(sup, items, sign) {
+    return [`${sup.slice(-2)}老師您好：`, '', '不好意思打擾您了！以下時段我無法到班，將由實習學生協助這幾位個案的職能治療課程，想麻煩您在場督導，非常感謝您：', '',
+      ...dateLines(items, it => `　實習生：${studentName(it.student)}`),
+      '如有任何問題，歡迎隨時與我聯繫。', '再次感謝您的協助，辛苦了！', '', `${sign} 敬上`].join('\n');
+  }
+  function stuMailBody(stuId, items, sign) {
+    const sups = [...new Set(items.map(i => i.sup))];
+    return [`${studentName(stuId)}同學你好：`, '', `以下時段我無法到班，請你協助這幾位個案的課程。當天由${sups.map(n => n + '老師').join('、')}在場督導，有任何狀況請先詢問督導老師：`, '',
+      ...dateLines(items, it => sups.length > 1 ? `　督導：${it.sup}老師` : ''),
+      '請事先準備好課程內容，辛苦了，謝謝你！', '', `${sign}`].join('\n');
+  }
   function mailBody(helper, items, sign) {
     const given = helper.slice(-2);
     const byDate = {};
@@ -1188,7 +1265,7 @@
   function openHelperMail(from, to) {
     let withWeekly = false;
     openSheet({
-      title: '寄信給協助同事', sub: '整理請其他治療師協助的個案，用你的郵件 App 寄出', wide: true,
+      title: '寄信給協助同事', sub: '整理請其他治療師或學生協助的個案，用你的郵件 App 寄出', wide: true,
       body: `
         <div class="row">
           <div class="field" style="margin:0"><label for="hm-from">從</label><input class="input num" type="date" id="hm-from" value="${from}"></div>
@@ -1205,13 +1282,36 @@
       if (!f || !t || t < f) { $('#hm-list').innerHTML = '<div class="err">請選擇正確的日期範圍</div>'; return; }
       const list = helperList(f, t, withWeekly);
       const sign = $('#hm-sign').value.trim() || '奇鑫';
-      const any = Object.values(list).some(a => a.length);
-      $('#hm-list').innerHTML = any ? U.THERAPISTS.filter(n => list[n].length).map(n => `
+      const stu = studentList(f, t);
+      const any = Object.values(list).some(a => a.length) || stu.length;
+      const bySup = {}, byStu = {};
+      stu.forEach(it => { (bySup[it.sup] = bySup[it.sup] || []).push(it); (byStu[it.student] = byStu[it.student] || []).push(it); });
+      const mailLink = (to, cc, subj, bodyTxt) => `mailto:${to}?${cc ? 'cc=' + encodeURIComponent(cc) + '&' : ''}subject=${encodeURIComponent(subj)}&body=${encodeURIComponent(bodyTxt.replace(/\n/g, '\r\n'))}`;
+      const stuHTML = stu.length ? `<div class="section-label">學生協助（需要老師在場督導）</div>` +
+        Object.keys(bySup).map(sp => {
+          const items = bySup[sp], ccs = [...new Set(items.map(i => (S.internById.get(i.student) || {}).email).filter(Boolean))].join(',');
+          const subj = `實習學生督導提醒（${mailSubject(items).replace(/^.*（/, '').replace('）', '')}）`;
+          return `<div class="report" style="margin-bottom:10px">
+            <div class="row" style="justify-content:space-between"><b>督導：${esc(sp)}　<span class="muted small">${HELPER_MAIL[sp] || ''}${ccs ? '・副本給學生' : ''}・${items.length} 位</span></b>
+              <span class="row"><button class="btn" data-copysup="${esc(sp)}">複製內容</button>${HELPER_MAIL[sp] ? `<a class="btn primary" data-mail="1" href="${mailLink(HELPER_MAIL[sp], ccs, subj, supMailBody(sp, items, sign))}">寄信</a>` : ''}</span></div>
+            <div class="small" style="white-space:pre-wrap;margin-top:10px;color:var(--ink-2)">${esc(supMailBody(sp, items, sign))}</div></div>`;
+        }).join('') +
+        Object.keys(byStu).map(sid => {
+          const items = byStu[sid], em = (S.internById.get(sid) || {}).email || '';
+          const subj = `職能治療個案協助通知（${mailSubject(items).replace(/^.*（/, '').replace('）', '')}）`;
+          return `<div class="report" style="margin-bottom:10px">
+            <div class="row" style="justify-content:space-between"><b>學生：${esc(studentName(sid))}　<span class="muted small">${em ? esc(em) : '未設定 email，可複製後用 LINE 傳'}・${items.length} 位</span></b>
+              <span class="row"><button class="btn" data-copystu="${esc(sid)}">複製內容</button>${em ? `<a class="btn primary" data-mail="1" href="${mailLink(em, '', subj, stuMailBody(sid, items, sign))}">寄信</a>` : ''}</span></div>
+            <div class="small" style="white-space:pre-wrap;margin-top:10px;color:var(--ink-2)">${esc(stuMailBody(sid, items, sign))}</div></div>`;
+        }).join('') : '';
+      $('#hm-list').innerHTML = !any ? `<div class="report">這段期間沒有標記「請其他治療師協助」或「請學生協助」的個案。<div class="small muted" style="margin-top:4px">先點個案 →「請假・評估」→ 選「請○○協助」或「請學生協助」，再回來寄信。</div></div>` : (U.THERAPISTS.filter(n => list[n].length).map(n => `
         <div class="report" style="margin-bottom:10px">
           <div class="row" style="justify-content:space-between"><b>${esc(n)}　<span class="muted small">${HELPER_MAIL[n]}・${list[n].length} 位</span></b>
             <span class="row"><button class="btn" data-copy="${esc(n)}">複製內容</button><a class="btn primary" href="mailto:${HELPER_MAIL[n]}?subject=${encodeURIComponent(mailSubject(list[n]))}&body=${encodeURIComponent(mailBody(n, list[n], sign).replace(/\n/g, '\r\n'))}" data-mail="${esc(n)}">寄信</a></span></div>
           <div class="small" style="white-space:pre-wrap;margin-top:10px;color:var(--ink-2)">${esc(mailBody(n, list[n], sign))}</div>
-        </div>`).join('') : `<div class="report">這段期間沒有標記「請其他治療師協助」的個案。<div class="small muted" style="margin-top:4px">先點個案 →「請假・評估」→ 選「請○○協助」，再回來寄信。</div></div>`;
+        </div>`).join('') + stuHTML);
+      $$('[data-copysup]').forEach(b => b.onclick = () => { const n = b.dataset.copysup; copyText(supMailBody(n, bySup[n], sign)).then(ok => toast(ok ? `已複製給${n}的督導通知` : '無法複製')); });
+      $$('[data-copystu]').forEach(b => b.onclick = () => { const n = b.dataset.copystu; copyText(stuMailBody(n, byStu[n], sign)).then(ok => toast(ok ? `已複製給${studentName(n)}的通知` : '無法複製')); });
       $$('[data-copy]').forEach(b => b.onclick = () => {
         const n = b.dataset.copy;
         copyText(`主旨：${mailSubject(list[n])}\n\n${mailBody(n, list[n], sign)}`).then(ok => toast(ok ? `已複製給${n}的信件內容` : '無法複製'));

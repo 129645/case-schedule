@@ -148,7 +148,7 @@
       const helper = m.status === 'helper' ? m.helper : (m.status ? '' : slot.helper || '');
       let intern = (m.intern !== undefined && m.intern !== null) ? m.intern : (slot.intern || '');
       if (intern && !this.internActive(intern, date)) intern = ''; // 實習期間外，自動歸還給老師
-      return { status, helper, intern, eval: !!m.eval, mark: m };
+      return { status, helper, intern, eval: !!m.eval, mark: m, student: m.status === 'student' ? m.student : '', sup: m.status === 'student' ? m.sup : '' };
     },
     internActive(id, date) {
       const i = this.internById && this.internById.get(id);
