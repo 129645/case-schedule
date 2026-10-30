@@ -20,7 +20,7 @@
     const m = [];
     if (e.status === 'parent') m.push('假');
     if (e.status === 'sms') m.push('訊');
-    if (e.status === 'student') m.push('生' + ((S.internById.get(e.student) || {}).name || '') + '／督' + (e.sup || '').slice(0, 1));
+    if (e.status === 'student') m.push('生' + ((S.internById.get(e.student) || {}).name || '') + '／督' + (e.sup || '').slice(0, 1) + ((e.acts || []).length ? '／' + e.acts.map(x => x.slice(0, 2)).join('、') : ''));
     if (e.status === 'moved') m.push(e.mark && e.mark.moveTo ? '調→' + md(e.mark.moveTo.date) : '調');
     if (e.status === 'self') m.push('個假');
     if (e.status === 'helper' && e.helper) m.push(e.helper[0]);

@@ -381,3 +381,7 @@ textarea.input { min-height: 96px; resize: vertical; }
 .intern-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 10px; }
 .intern-card.is-done { background: var(--surface-2); }
 .banner.intern-end { background: var(--blue-soft); padding: 8px 14px; }
+
+.opt .chk { width: 18px; height: 18px; border-radius: 5px; border: 2px solid var(--line); flex: none; display: grid; place-items: center; }
+.opt[aria-checked="true"] .chk { border-color: var(--accent); background: var(--accent); }
+.opt[aria-checked="true"] .chk::after { content: ""; width: 9px; height: 5px; border: 2px solid var(--accent-ink); border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }

@@ -39,6 +39,8 @@
   }
   const OFF = st => st === 'parent' || st === 'self' || st === 'sms' || st === 'moved';
   const STATUS_LABEL = { student: '請學生協助', parent: '已向家長請假', self: '個案自己請假', sms: '已傳送簡訊請假', moved: '已調課至其他日期' };
+  const ACTS = ['精細動作訓練', '感覺統合訓練', '視知覺訓練', '評估'];
+  const actText = (acts, note) => [(acts || []).join('、'), note ? `備註：${note}` : ''].filter(Boolean).join('；');
   const studentName = id => (S.internById.get(id) || {}).name || '學生';
   const whenText = (d, t) => `${md(d)}（${DAY_S[U.weekday(d)]}）${t}`;
 
@@ -312,7 +314,7 @@
     if (OFF(e.status)) cls.push('off');
     if (dimmed(e)) cls.push('dim');
     const name = S.nameOf(s);
-    const title = [name, s.note, e.status === 'helper' && e.helper ? '由' + e.helper + '協助' : '', e.status === 'student' ? `由學生${studentName(e.student)}協助（${e.sup}督導）` : '', e.status === 'moved' && e.mark.moveTo ? '已調課至 ' + whenText(e.mark.moveTo.date, e.mark.moveTo.time) : '', s.makeupOf ? '調課（原 ' + whenText(s.makeupOf.date, s.makeupOf.time) + '）' : ''].filter(Boolean).join('・');
+    const title = [name, s.note, e.status === 'helper' && e.helper ? '由' + e.helper + '協助' : '', e.status === 'student' ? `由學生${studentName(e.student)}協助（${e.sup}督導）${e.acts.length || e.actNote ? '・活動：' + actText(e.acts, e.actNote) : ''}` : '', e.status === 'moved' && e.mark.moveTo ? '已調課至 ' + whenText(e.mark.moveTo.date, e.mark.moveTo.time) : '', s.makeupOf ? '調課（原 ' + whenText(s.makeupOf.date, s.makeupOf.time) + '）' : ''].filter(Boolean).join('・');
     return `<button class="${cls.join(' ')}" data-slot="${esc(s.id)}" data-date="${d}" title="${esc(title)}"><span class="nm">${esc(name)}</span>${badges(s, e, d)}</button>`;
   }
 
@@ -401,6 +403,7 @@
     if (e.status === 'parent') tags.push('<span class="tag leave">已向家長請假</span>');
     if (e.status === 'sms') tags.push('<span class="tag leave">已傳送簡訊請假</span>');
     if (e.status === 'student') tags.push(`<span class="tag help">由學生${esc(studentName(e.student))}協助・${esc(e.sup)}督導</span>`);
+    if (e.status === 'student' && (e.acts.length || e.actNote)) tags.push(`<span class="tag">活動：${esc(actText(e.acts, e.actNote))}</span>`);
     if (e.status === 'moved') tags.push(`<span class="tag moved">已調課至 ${e.mark.moveTo ? whenText(e.mark.moveTo.date, e.mark.moveTo.time) : '其他日期'}</span>`);
     if (s.makeupOf) tags.push(`<span class="tag once">調課（原 ${whenText(s.makeupOf.date, s.makeupOf.time)}）</span>`);
     if (e.status === 'none' && leaveAt(d, s.time)) tags.push('<span class="tag todo">你請假中・尚未處理</span>');
@@ -584,6 +587,9 @@
         <div class="opt-grid" id="stu-pick" style="margin-top:8px">${stuNow.map(i => `<button class="opt" role="radio" data-stu="${esc(i.id)}" aria-checked="${(e.status === 'student' ? e.student : stuNow.length === 1 ? i.id : '') === i.id}"><span class="sw c-${i.color}"></span><span>${esc(i.name)}</span></button>`).join('')}</div>
         <b style="display:block;margin-top:12px">由哪位老師在場督導？</b>
         <div class="opt-grid" id="sup-pick" style="margin-top:8px">${U.THERAPISTS.map(n => `<button class="opt" role="radio" data-sup="${n}" aria-checked="${e.status === 'student' && e.sup === n}"><span class="dot"></span><span>${n}</span></button>`).join('')}</div>
+        <b style="display:block;margin-top:12px">這堂課要做的活動（可多選）</b>
+        <div class="opt-grid" id="act-pick" style="margin-top:8px">${ACTS.map(a => `<button class="opt" role="checkbox" data-act="${a}" aria-checked="${e.status === 'student' && e.acts.includes(a)}"><span class="chk"></span><span>${a}</span></button>`).join('')}</div>
+        <div class="field" style="margin:10px 0 0"><label for="act-note">備註（選填，例如：練習扣釦子、上次做到第 3 關）</label><input class="input" id="act-note" value="${esc(e.status === 'student' ? e.actNote : '')}"></div>
         <div class="err" id="stu-err"></div>
         <div class="row"><button class="btn primary needs-net" id="stu-ok">確認</button><button class="btn ghost" id="stu-cancel">取消</button></div>
         <div class="hint" style="margin-top:6px">確認後，可以按下方「寄信給協助同事」通知督導老師和學生。</div>`
@@ -672,15 +678,16 @@
       });
       const ok = await guard(async () => {
         await S.save('slots', makeup);
-        await S.setMark(s, date, { status: 'moved', helper: undefined, moveTo: { date: d, time: t }, makeup: makeup.id });
+        await S.setMark(s, date, { status: 'moved', helper: undefined, student: undefined, sup: undefined, acts: undefined, actNote: undefined, moveTo: { date: d, time: t }, makeup: makeup.id });
       }, `已調課至 ${whenText(d, t)}，之後每週仍照原時段`);
       if (ok) repaint();
     };
     // ---- 請學生協助 ----
     const stuBox = $('#stu-box', body);
-    const pickOne = (sel, el) => { $$(sel, body).forEach(x => x.setAttribute('aria-checked', x === el)); };
+    const pickOne = (sel, el) => { $$(sel, body).forEach(x => x.setAttribute('aria-checked', x === el)); const er = $('#stu-err', body); if (er) er.textContent = ''; };
     $$('#stu-pick [data-stu]', body).forEach(x => x.onclick = () => pickOne('#stu-pick [data-stu]', x));
     $$('#sup-pick [data-sup]', body).forEach(x => x.onclick = () => pickOne('#sup-pick [data-sup]', x));
+    $$('#act-pick [data-act]', body).forEach(x => x.onclick = () => x.setAttribute('aria-checked', x.getAttribute('aria-checked') !== 'true'));
     $('#stu-cancel', body).onclick = () => stuBox.classList.add('hidden');
     const stuOk = $('#stu-ok', body);
     if (stuOk) stuOk.onclick = async () => {
@@ -688,6 +695,7 @@
       if (!st) return (err.textContent = '請選擇一位學生');
       if (!sp) return (err.textContent = '請選擇督導老師');
       const sid = st.dataset.stu, sup = sp.dataset.sup;
+      const acts = $$('#act-pick [aria-checked="true"]', body).map(x => x.dataset.act), actNote = $('#act-note', body).value.trim();
       let dates = range ? S.occurrences(s, date, toEl.value || date) : [date];
       const skip = dates.filter(d => !S.internActive(sid, d));
       dates = dates.filter(d => S.internActive(sid, d));
@@ -695,7 +703,7 @@
       const clean = e.status === 'moved' && e.mark.makeup ? e.mark.makeup : null;
       const ok = await guard(async () => {
         if (clean && S.data.slots.some(x => x.id === clean)) await S.remove('slots', clean);
-        for (const d of dates) await S.setMark(s, d, { status: 'student', student: sid, sup, helper: undefined, moveTo: undefined, makeup: undefined });
+        for (const d of dates) await S.setMark(s, d, { status: 'student', student: sid, sup, acts: acts.length ? acts : undefined, actNote: actNote || undefined, helper: undefined, moveTo: undefined, makeup: undefined });
       }, `已安排學生${studentName(sid)}協助（${sup}督導）${dates.length > 1 ? `，共 ${dates.length} 次` : ''}${skip.length ? `；${skip.map(md).join('、')} 不在實習期間，未套用` : ''}`);
       if (ok) repaint();
     };
@@ -708,7 +716,7 @@
         if (e.status === 'moved' && e.mark.makeup) {
           // 取消調課：刪掉補課那一堂
           const mk = e.mark.makeup;
-          const pre = { moveTo: undefined, makeup: undefined, student: undefined, sup: undefined };
+          const pre = { moveTo: undefined, makeup: undefined, student: undefined, sup: undefined, acts: undefined, actNote: undefined };
           const p2 = v.startsWith('helper:') ? { status: 'helper', helper: v.slice(7) } : { status: v === 'none' && !s.helper ? undefined : v, helper: undefined };
           const ok = await guard(async () => {
             if (S.data.slots.some(x => x.id === mk)) await S.remove('slots', mk);
@@ -719,7 +727,7 @@
           return;
         }
         const patch = v.startsWith('helper:') ? { status: 'helper', helper: v.slice(7) } : { status: v, helper: undefined };
-        patch.student = undefined; patch.sup = undefined;
+        patch.student = undefined; patch.sup = undefined; patch.acts = undefined; patch.actNote = undefined;
         if (v === 'none' && !s.helper) patch.status = undefined;
         const dates = range ? S.occurrences(s, date, toEl.value || date) : [date];
         const ok = await guard(async () => { for (const d of dates) await S.setMark(s, d, patch); },
@@ -1216,7 +1224,7 @@
         const e = S.effective(s, d);
         if (e.status !== 'student' || !e.student) continue;
         const c = S.caseOf(s);
-        out.push({ date: d, time: s.time, name: S.nameOf(s), age: c && c.birthday ? U.ageText(U.ageBetween(c.birthday, d)) : '', student: e.student, sup: e.sup });
+        out.push({ date: d, time: s.time, name: S.nameOf(s), age: c && c.birthday ? U.ageText(U.ageBetween(c.birthday, d)) : '', student: e.student, sup: e.sup, act: actText(e.acts, e.actNote) });
       }
     }
     return out.sort((x, y) => x.date.localeCompare(y.date) || x.time.localeCompare(y.time));
@@ -1234,13 +1242,13 @@
   }
   function supMailBody(sup, items, sign) {
     return [`${sup.slice(-2)}老師您好：`, '', '不好意思打擾您了！以下時段我無法到班，將由實習學生協助這幾位個案的職能治療課程，想麻煩您在場督導，非常感謝您：', '',
-      ...dateLines(items, it => `　實習生：${studentName(it.student)}`),
+      ...dateLines(items, it => `　實習生：${studentName(it.student)}${it.act ? `\n　　　　　　活動：${it.act}` : ''}`),
       '如有任何問題，歡迎隨時與我聯繫。', '再次感謝您的協助，辛苦了！', '', `${sign} 敬上`].join('\n');
   }
   function stuMailBody(stuId, items, sign) {
     const sups = [...new Set(items.map(i => i.sup))];
     return [`${studentName(stuId)}同學你好：`, '', `以下時段我無法到班，請你協助這幾位個案的課程。當天由${sups.map(n => n + '老師').join('、')}在場督導，有任何狀況請先詢問督導老師：`, '',
-      ...dateLines(items, it => sups.length > 1 ? `　督導：${it.sup}老師` : ''),
+      ...dateLines(items, it => `${sups.length > 1 ? `　督導：${it.sup}老師` : ''}${it.act ? `\n　　　　　　活動：${it.act}` : ''}`),
       '請事先準備好課程內容，辛苦了，謝謝你！', '', `${sign}`].join('\n');
   }
   function mailBody(helper, items, sign) {
