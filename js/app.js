@@ -605,7 +605,8 @@
         <div class="err" id="mv-err2"></div>
         <div class="row"><button class="btn primary needs-net" id="mv-ok">${mv ? '改成這個時間' : '確認調課'}</button><button class="btn ghost" id="mv-cancel">取消</button></div>
       </div>
-      ${s.helper ? `<div class="hint" style="margin-top:6px">每週固定由${esc(s.helper)}協助（可在「更動」修改）</div>` : ''}
+      ${s.helper ? `<div class="report small" style="margin-top:8px;background:var(--blue-soft)"><b>注意：這位個案設定為「每週固定由${esc(s.helper)}協助」</b>，所以每個${DAY[s.day]}都會顯示「${esc(s.helper[0])}」。如果只有這次需要協助，請按下面的按鈕。
+        <div class="row" style="margin-top:8px"><button class="btn small-btn needs-net" id="helper-once">改成只有 ${md(date)} 請${esc(s.helper)}協助</button><button class="btn small-btn ghost needs-net" id="helper-off">取消每週固定協助</button></div></div>` : ''}
       <div class="section-label">套用範圍</div>
       <div class="row">
         <div class="seg" role="group"><button id="rg-one" aria-pressed="true">只有這天</button><button id="rg-range" aria-pressed="false">一段日期</button></div>
@@ -651,6 +652,26 @@
     $('#rg-one', body).onclick = () => { range = false; $('#rg-one', body).setAttribute('aria-pressed', true); $('#rg-range', body).setAttribute('aria-pressed', false); toEl.classList.add('hidden'); hint(); };
     $('#rg-range', body).onclick = () => { range = true; $('#rg-range', body).setAttribute('aria-pressed', true); $('#rg-one', body).setAttribute('aria-pressed', false); toEl.classList.remove('hidden'); hint(); };
     toEl.oninput = hint;
+    // ---- 每週固定協助 → 只有這一次 ----
+    const hOnce = $('#helper-once', body), hOff = $('#helper-off', body);
+    if (hOnce) hOnce.onclick = async () => {
+      const h = s.helper;
+      const ok = await guard(async () => {
+        await S.save('slots', Object.assign({}, s, { helper: '' }));
+        // 這一天保留請該治療師協助（若這天原本另有標註則不更動）
+        if (!e.mark.status || e.mark.status === 'helper' || e.mark.status === 'none') await S.setMark(Object.assign({}, s, { helper: '' }), date, { status: 'helper', helper: h });
+      }, `已改成只有 ${md(date)} 請${h}協助，其他${DAY[s.day]}恢復正常`);
+      if (ok) repaint();
+    };
+    if (hOff) hOff.onclick = async () => {
+      const h = s.helper;
+      const ok = await guard(async () => {
+        await S.save('slots', Object.assign({}, s, { helper: '' }));
+        const ms = S.data.marks.filter(m => m.slot === s.id && m.status === 'none');
+        for (const m of ms) await S.setMark(Object.assign({}, s, { helper: '' }), m.date, { status: undefined });
+      }, `已取消每週固定由${h}協助`);
+      if (ok) repaint();
+    };
     // ---- 調課 ----
     const box = $('#mv-box', body), mvDate = $('#mv-date', body), mvTime = $('#mv-time', body);
     const mvHint = () => {
